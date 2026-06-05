@@ -1,0 +1,23 @@
+# Godot 4+ specific ignores
+.godot/
+!.godot/extension_list.cfg
+
+# Godot-specific editor UI configuration
+*.godot
+!project.godot
+
+# C# / .NET
+.mono/
+bin/
+obj/
+*.csproj.user
+*.csproj.old
+
+# Kilo or other IDE files
+.kilo/
+.idea/
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
