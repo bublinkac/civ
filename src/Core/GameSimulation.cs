@@ -796,13 +796,19 @@ public class GameSimulation
         GameEndState endState,
         string playerCivId,
         string aiCivId,
+        int playerTreasury,
+        int playerTaxRate,
+        int lastTurnIncome,
+        int lastTurnMaintenance,
+        int lastTurnScience,
+        int lastTurnNetGold,
         List<UnitSaveDto> unitDtos, 
         List<CitySaveDto> cityDtos, 
         List<TileSaveDto> tileDtos, 
         List<string> researchedIds, 
         string? activeTechId, 
         int progress, 
-        int lastTurnScience,
+        int lastTurnScienceGenerated,
         List<(int X, int Y)> camps)
     {
         TurnNumber = turnNumber;
@@ -810,6 +816,12 @@ public class GameSimulation
         EndState = endState;
         PlayerCivId = playerCivId;
         AiCivId = aiCivId;
+        PlayerTreasury = playerTreasury;
+        PlayerTaxRate = playerTaxRate;
+        LastTurnIncome = lastTurnIncome;
+        LastTurnMaintenance = lastTurnMaintenance;
+        LastTurnScience = lastTurnScience;
+        LastTurnNetGold = lastTurnNetGold;
 
         // 1. Reconstruct Map Tiles
         foreach (var dto in tileDtos)
@@ -822,6 +834,7 @@ public class GameSimulation
                 
                 tile.OwnerCityId = dto.OwnerCityId;
                 tile.MovementCost = tile.Terrain.MovementCost;
+                tile.HasRoad = dto.HasRoad;
                 
                 // Reconstruct Improvement
                 if (string.IsNullOrEmpty(dto.ImprovementName))
@@ -875,6 +888,21 @@ public class GameSimulation
             city.LastTurnNetFood = dto.LastTurnNetFood;
             city.CurrentProject = dto.CurrentProject;
             city.CurrentProductionProgress = dto.CurrentProductionProgress;
+            city.UpdateCityType();
+
+            // Reconstruct Worked Tiles
+            city.WorkedTiles.Clear();
+            if (dto.WorkedTiles != null)
+            {
+                foreach (var wtStr in dto.WorkedTiles)
+                {
+                    var parts = wtStr.Split(',');
+                    if (parts.Length == 2 && int.TryParse(parts[0], out int wx) && int.TryParse(parts[1], out int wy))
+                    {
+                        city.WorkedTiles.Add((wx, wy));
+                    }
+                }
+            }
             
             // Reconstruct Buildings
             city.Buildings.Clear();
@@ -919,7 +947,7 @@ public class GameSimulation
         BarbarianCamps.AddRange(camps);
 
         // 5. Reconstruct Research
-        Research.LoadResearchState(researchedIds, activeTechId, progress, lastTurnScience);
+        Research.LoadResearchState(researchedIds, activeTechId, progress, lastTurnScienceGenerated);
 
         // 6. Reconstruct Wonder Claim and Victory State from board
         CompletedWonderIds.Clear();

@@ -100,6 +100,20 @@ public partial class UnitRenderer : Node2D
                 }
             }
 
+            // Apply modulation color based on faction to distinguish units
+            if (unit.Faction == Faction.Barbarian)
+            {
+                sprite.SelfModulate = new Color(0.9f, 0.4f, 0.4f); // Reddish tint for Barbarians
+            }
+            else if (unit.Faction == Faction.AiRival)
+            {
+                sprite.SelfModulate = new Color(0.7f, 0.6f, 0.9f); // Purple tint for AI
+            }
+            else
+            {
+                sprite.SelfModulate = Colors.White; // Normal (no tint) for Player
+            }
+
             // Update selection ring position under the selected unit
             if (unit.Id == selectedUnitId)
             {
@@ -132,6 +146,39 @@ public partial class UnitRenderer : Node2D
     private Texture2D GetOrCreateUnitTexture(UnitType type)
     {
         string dirPath = "res://assets";
+        string baseName = type switch
+        {
+            UnitType.Explorer => "explorer",
+            UnitType.Settler => "settler",
+            UnitType.Warrior => "warrior",
+            UnitType.Archer => "archer",
+            UnitType.Barbarian => "warrior", // Barbarians share the warrior texture but will be tinted red
+            UnitType.Worker => "worker",
+            _ => type.ToString().ToLower()
+        };
+
+        string origPath = $"{dirPath}/{baseName}_orig.webp";
+        
+        // Use FileAccess.FileExists to check if the file is on disk (even if not imported by Godot yet)
+        if (FileAccess.FileExists(origPath))
+        {
+            try
+            {
+                var img = Image.LoadFromFile(origPath);
+                if (img != null && !img.IsEmpty())
+                {
+                    img = MakeBackgroundTransparentBFS(img, Colors.White);
+                    GD.Print($"[UnitRenderer] Loaded ORIGINAL texture for {type} from {origPath}");
+                    return ImageTexture.CreateFromImage(img);
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"[UnitRenderer] Warning: Could not load original asset {origPath} using LoadFromFile: {ex.Message}");
+            }
+        }
+
+        // Fallback to procedural generation if original doesn't exist or failed to load
         string fileName = type.ToString().ToLower() + ".png";
         string filePath = $"{dirPath}/{fileName}";
 
@@ -140,18 +187,99 @@ public partial class UnitRenderer : Node2D
             DirAccess.MakeDirRecursiveAbsolute(dirPath);
         }
 
-        Image img = GenerateUnitImage(type);
+        // If the file already exists, let's try to load it from file too (in case of import lag)
+        if (FileAccess.FileExists(filePath))
+        {
+            try
+            {
+                var img = Image.LoadFromFile(filePath);
+                if (img != null && !img.IsEmpty())
+                {
+                    GD.Print($"[UnitRenderer] Loaded PROCEDURAL texture for {type} from {filePath}");
+                    return ImageTexture.CreateFromImage(img);
+                }
+            }
+            catch {}
+        }
+
+        Image genImg = GenerateUnitImage(type);
 
         try
         {
-            img.SavePng(filePath);
+            genImg.SavePng(filePath);
         }
         catch (Exception ex)
         {
             GD.Print($"[UnitRenderer] Warning: Could not save PNG to {filePath}: {ex.Message}");
         }
 
-        return ImageTexture.CreateFromImage(img);
+        GD.Print($"[UnitRenderer] Generated and loaded PROCEDURAL texture for {type} from {filePath}");
+        return ImageTexture.CreateFromImage(genImg);
+    }
+
+    private static Image MakeBackgroundTransparentBFS(Image img, Color keyColor, float threshold = 0.08f)
+    {
+        img.Convert(Image.Format.Rgba8);
+        int width = img.GetWidth();
+        int height = img.GetHeight();
+        
+        bool[,] visited = new bool[width, height];
+        Queue<Vector2I> queue = new Queue<Vector2I>();
+        
+        // Add all edge pixels as starting points
+        for (int x = 0; x < width; x++)
+        {
+            queue.Enqueue(new Vector2I(x, 0));
+            queue.Enqueue(new Vector2I(x, height - 1));
+            visited[x, 0] = true;
+            visited[x, height - 1] = true;
+        }
+        for (int y = 1; y < height - 1; y++)
+        {
+            queue.Enqueue(new Vector2I(0, y));
+            queue.Enqueue(new Vector2I(width - 1, y));
+            visited[0, y] = true;
+            visited[width - 1, y] = true;
+        }
+        
+        while (queue.Count > 0)
+        {
+            Vector2I curr = queue.Dequeue();
+            Color pixel = img.GetPixel(curr.X, curr.Y);
+            
+            float diffR = Math.Abs(pixel.R - keyColor.R);
+            float diffG = Math.Abs(pixel.G - keyColor.G);
+            float diffB = Math.Abs(pixel.B - keyColor.B);
+            
+            if (diffR <= threshold && diffG <= threshold && diffB <= threshold)
+            {
+                // Make it transparent
+                img.SetPixel(curr.X, curr.Y, new Color(pixel.R, pixel.G, pixel.B, 0.0f));
+                
+                // Add neighbors
+                Vector2I[] neighbors = new Vector2I[]
+                {
+                    new Vector2I(curr.X + 1, curr.Y),
+                    new Vector2I(curr.X - 1, curr.Y),
+                    new Vector2I(curr.X, curr.Y + 1),
+                    new Vector2I(curr.X, curr.Y - 1)
+                };
+                
+                foreach (var n in neighbors)
+                {
+                    if (n.X >= 0 && n.X < width && n.Y >= 0 && n.Y < height)
+                    {
+                        if (!visited[n.X, n.Y])
+                        {
+                            visited[n.X, n.Y] = true;
+                            queue.Enqueue(n);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return img;
     }
 
     private Image GenerateUnitImage(UnitType type)

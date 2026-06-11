@@ -24,19 +24,19 @@ This document serves as an overview of achieved progress and a high-level plan f
 ### Phase 13: Wonders & National Wonders (COMPLETED)
 - ... (Existing content remains unchanged)
 
-### Phase 14: Professional City Screen Redesign (IN PROGRESS)
+### Phase 14: Professional City Screen Redesign (COMPLETED)
 
 - [x] **Architecture Refactoring & Component Library:**
     - [x] Redesign `CityDetailPanel` to a modular container layout.
     - [x] Build a library of reusable UI components (skeleton classes).
 - [x] **Layout Orchestration:**
     - [x] Create main `CityDetailPanel` layout engine.
-- [ ] **Component Implementation:**
-    - [ ] **Component: Header:** Implement UI for name, date, gold, gov, population, nav.
-    - [ ] **Component: StrategicResources:** Icon row with resource quantity indicators.
+- [x] **Component Implementation:**
+    - [x] **Component: Header:** Implement UI for name, date, gold, gov, population, nav.
+    - [x] **Component: StrategicResources:** Icon row with resource quantity indicators.
     - [x] **Component: InteractiveMap:** Implement terrain grid, citizen toggles, yields.
-    - [ ] **Component: BuildingsList:** Implement icon-based inventory, stats, culture bonuses.
-    - [ ] **Component: ProductionQueue:** Implement active project, progress, queue management.
-    - [ ] **Component: Granary:** Implement food storage grid visualization.
-    - [ ] **Component: EconomyModule:** Implement commerce sliders, happiness (luxuries/unhappiness icons).
-    - [ ] **Component: Garrison:** Implement stationed units list.
+    - [x] **Component: BuildingsList:** Implement icon-based inventory, stats, culture bonuses.
+    - [x] **Component: ProductionQueue:** Implement active project, progress, queue management.
+    - [x] **Component: Granary:** Implement food storage grid visualization.
+    - [x] **Component: EconomyModule:** Implement commerce sliders, happiness (luxuries/unhappiness icons).
+    - [x] **Component: Garrison:** Implement stationed units list.

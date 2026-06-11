@@ -54,6 +54,7 @@ public class CitySaveDto
     public ProductionProject CurrentProject { get; set; }
     public int CurrentProductionProgress { get; set; }
     public List<string> BuildingNames { get; set; } = new();
+    public List<string> WorkedTiles { get; set; } = new(); // format: "x,y"
     public Faction Faction { get; set; }
     public string? CivilizationId { get; set; }
 }
@@ -65,6 +66,14 @@ public class SaveDataDto
     public GameEndState EndState { get; set; }
     public string PlayerCivId { get; set; } = "rome";
     public string AiCivId { get; set; } = "babylon";
+    
+    // Economy and Treasury
+    public int PlayerTreasury { get; set; }
+    public int PlayerTaxRate { get; set; }
+    public int LastTurnIncome { get; set; }
+    public int LastTurnMaintenance { get; set; }
+    public int LastTurnScience { get; set; }
+    public int LastTurnNetGold { get; set; }
     
     // Flat Visibility list of int representing the FogState enum
     public List<int> VisibilityGridFlat { get; set; } = new();

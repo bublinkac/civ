@@ -30,6 +30,12 @@ public class JsonSaveSystem : ISaveSystem
             EndState = sim.EndState,
             PlayerCivId = sim.PlayerCivId,
             AiCivId = sim.AiCivId,
+            PlayerTreasury = sim.PlayerTreasury,
+            PlayerTaxRate = sim.PlayerTaxRate,
+            LastTurnIncome = sim.LastTurnIncome,
+            LastTurnMaintenance = sim.LastTurnMaintenance,
+            LastTurnScience = sim.LastTurnScience,
+            LastTurnNetGold = sim.LastTurnNetGold,
             CurrentResearchId = sim.Research.CurrentResearch?.Id,
             CurrentScienceProgress = sim.Research.CurrentScienceProgress,
             LastTurnScienceGenerated = sim.Research.LastTurnScienceGenerated
@@ -58,7 +64,8 @@ public class JsonSaveSystem : ISaveSystem
                         Y = tile.Y,
                         TerrainId = tile.Terrain.Id,
                         OwnerCityId = tile.OwnerCityId,
-                        ImprovementName = tile.Improvement?.Name
+                        ImprovementName = tile.Improvement?.Name,
+                        HasRoad = tile.HasRoad
                     });
                 }
             }
@@ -101,6 +108,7 @@ public class JsonSaveSystem : ISaveSystem
                 FoundedYear = city.FoundedYear,
                 CurrentProject = city.CurrentProject,
                 CurrentProductionProgress = city.CurrentProductionProgress,
+                WorkedTiles = city.WorkedTiles.Select(t => $"{t.X},{t.Y}").ToList(),
                 Faction = city.Faction,
                 CivilizationId = city.CivilizationId
             };
@@ -165,6 +173,12 @@ public class JsonSaveSystem : ISaveSystem
                 dto.EndState,
                 dto.PlayerCivId,
                 dto.AiCivId,
+                dto.PlayerTreasury,
+                dto.PlayerTaxRate,
+                dto.LastTurnIncome,
+                dto.LastTurnMaintenance,
+                dto.LastTurnScience,
+                dto.LastTurnNetGold,
                 dto.Units,
                 dto.Cities,
                 dto.Tiles,

@@ -462,8 +462,8 @@ public partial class MapRenderer : TileMapLayer
         // Ensure the mouse is actually inside the window (focused)
         if (mousePos.X >= 0 && mousePos.Y >= 0 && mousePos.X <= viewportSize.X && mousePos.Y <= viewportSize.Y)
         {
-            // Do not edge-scroll down if mouse is hovering over the bottom HUD dock (bottom 160px)
-            bool overBottomHud = mousePos.Y > viewportSize.Y - 160;
+            // Do not edge-scroll down if mouse is hovering over the bottom HUD dock (bottom 160px), unless slammed to the very bottom edge (bottom 10px)
+            bool overBottomHud = mousePos.Y > viewportSize.Y - 160 && mousePos.Y <= viewportSize.Y - 10f;
             // Do not edge-scroll up if mouse is hovering over the top bar (top-left 350px wide, 60px high)
             bool overTopBar = mousePos.Y < 60 && mousePos.X < 350;
 

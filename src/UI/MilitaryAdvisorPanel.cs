@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using CivGame.Core;
 using System.Linq;
@@ -202,11 +203,40 @@ public partial class MilitaryAdvisorPanel : PanelContainer
         spritesHBox.AddThemeConstantOverride("separation", 2);
         
         // Load Texture based on unit type
-        string texturePath = $"res://assets/{type.ToString().ToLower()}.png";
-        Texture2D? tex = null;
-        if (ResourceLoader.Exists(texturePath))
+        string baseName = type switch
         {
-            tex = GD.Load<Texture2D>(texturePath);
+            UnitType.Explorer => "explorer",
+            UnitType.Settler => "settler",
+            UnitType.Warrior => "warrior",
+            UnitType.Archer => "archer",
+            UnitType.Barbarian => "warrior",
+            UnitType.Worker => "worker",
+            _ => type.ToString().ToLower()
+        };
+        string texturePath = $"res://assets/{baseName}_orig.webp";
+        if (!FileAccess.FileExists(texturePath))
+        {
+            texturePath = $"res://assets/{type.ToString().ToLower()}.png";
+        }
+        Texture2D? tex = null;
+        if (FileAccess.FileExists(texturePath))
+        {
+            try
+            {
+                var img = Image.LoadFromFile(texturePath);
+                if (img != null && !img.IsEmpty())
+                {
+                    if (texturePath.Contains("_orig.webp"))
+                    {
+                        img = MakeBackgroundTransparentBFS(img, Colors.White);
+                    }
+                    tex = ImageTexture.CreateFromImage(img);
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"[MilitaryAdvisorPanel] Warning: Could not load texture from file {texturePath}: {ex.Message}");
+            }
         }
 
         // Draw up to 20 icons, if more, add a + indicator or just clamp
@@ -262,6 +292,71 @@ public partial class MilitaryAdvisorPanel : PanelContainer
         vbox.AddChild(valLabel);
         panel.AddChild(vbox);
         return panel;
+    }
+
+    private static Image MakeBackgroundTransparentBFS(Image img, Color keyColor, float threshold = 0.08f)
+    {
+        img.Convert(Image.Format.Rgba8);
+        int width = img.GetWidth();
+        int height = img.GetHeight();
+        
+        bool[,] visited = new bool[width, height];
+        Queue<Vector2I> queue = new Queue<Vector2I>();
+        
+        // Add all edge pixels as starting points
+        for (int x = 0; x < width; x++)
+        {
+            queue.Enqueue(new Vector2I(x, 0));
+            queue.Enqueue(new Vector2I(x, height - 1));
+            visited[x, 0] = true;
+            visited[x, height - 1] = true;
+        }
+        for (int y = 1; y < height - 1; y++)
+        {
+            queue.Enqueue(new Vector2I(0, y));
+            queue.Enqueue(new Vector2I(width - 1, y));
+            visited[0, y] = true;
+            visited[width - 1, y] = true;
+        }
+        
+        while (queue.Count > 0)
+        {
+            Vector2I curr = queue.Dequeue();
+            Color pixel = img.GetPixel(curr.X, curr.Y);
+            
+            float diffR = Math.Abs(pixel.R - keyColor.R);
+            float diffG = Math.Abs(pixel.G - keyColor.G);
+            float diffB = Math.Abs(pixel.B - keyColor.B);
+            
+            if (diffR <= threshold && diffG <= threshold && diffB <= threshold)
+            {
+                // Make it transparent
+                img.SetPixel(curr.X, curr.Y, new Color(pixel.R, pixel.G, pixel.B, 0.0f));
+                
+                // Add neighbors
+                Vector2I[] neighbors = new Vector2I[]
+                {
+                    new Vector2I(curr.X + 1, curr.Y),
+                    new Vector2I(curr.X - 1, curr.Y),
+                    new Vector2I(curr.X, curr.Y + 1),
+                    new Vector2I(curr.X, curr.Y - 1)
+                };
+                
+                foreach (var n in neighbors)
+                {
+                    if (n.X >= 0 && n.X < width && n.Y >= 0 && n.Y < height)
+                    {
+                        if (!visited[n.X, n.Y])
+                        {
+                            visited[n.X, n.Y] = true;
+                            queue.Enqueue(n);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return img;
     }
 }
 
