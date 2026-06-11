@@ -50,6 +50,7 @@ public class CitySaveDto
     public int StoredCommerce { get; set; }
     public int Population { get; set; }
     public int LastTurnNetFood { get; set; }
+    public int FoundedYear { get; set; }
     public ProductionProject CurrentProject { get; set; }
     public int CurrentProductionProgress { get; set; }
     public List<string> BuildingNames { get; set; } = new();

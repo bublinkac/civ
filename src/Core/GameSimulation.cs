@@ -27,7 +27,21 @@ public class GameSimulation
 
         // Wonder tracking
         public HashSet<string> CompletedWonderIds { get; } = new();
-        public HashSet<string> CompletedSmallWonderIds { get; } = new();
+        public Dictionary<Faction, HashSet<string>> CompletedSmallWondersByFaction { get; } = new();
+        public HashSet<string> CompletedSmallWonderIds => GetCompletedSmallWonders(Faction.Player);
+        public HashSet<Faction> FactionsWithVictoriousUnit { get; } = new();
+
+        public static bool DebugIgnorePrerequisites { get; set; }
+
+        public HashSet<string> GetCompletedSmallWonders(Faction faction)
+        {
+            if (!CompletedSmallWondersByFaction.TryGetValue(faction, out var set))
+            {
+                set = new HashSet<string>();
+                CompletedSmallWondersByFaction[faction] = set;
+            }
+            return set;
+        }
 
         public string PlayerCivId { get; set; } = "rome";
         public string AiCivId { get; set; } = "babylon";
@@ -41,6 +55,10 @@ public class GameSimulation
 
     public GameSimulation(GameMap map)
     {
+        DebugIgnorePrerequisites = Environment.GetEnvironmentVariable("CIV_DEBUG_BUILD") == "1";
+        if (DebugIgnorePrerequisites)
+            Console.WriteLine("[DEBUG] CIV_DEBUG_BUILD=1 — All wonder/building prerequisites ignored!");
+
         Map = map;
         VisibilityGrid = new FogState[map.Width, map.Height];
         
@@ -310,7 +328,7 @@ public class GameSimulation
             _cityCounter++;
         }
 
-        var city = new City($"city_{Guid.NewGuid().ToString().Substring(0, 8)}", name, unit.X, unit.Y, unit.Faction, unit.CivilizationId);
+        var city = new City($"city_{Guid.NewGuid().ToString().Substring(0, 8)}", name, unit.X, unit.Y, TurnNumber, unit.Faction, unit.CivilizationId);
         Cities.Add(city);
         Units.Remove(unit); // Consume settler
 
@@ -343,12 +361,12 @@ public class GameSimulation
         }
     }
 
-    public void ClaimWonder(Wonder wonder)
+    public void ClaimWonder(Wonder wonder, Faction faction)
     {
         if (wonder.IsNationalWonder)
         {
-            CompletedSmallWonderIds.Add(wonder.Id);
-            Console.WriteLine($"[Wonder] Small Wonder {wonder.Name} claimed (can be built in multiple cities)!");
+            GetCompletedSmallWonders(faction).Add(wonder.Id);
+            Console.WriteLine($"[Wonder] Small Wonder {wonder.Name} claimed by {faction}!");
         }
         else
         {
@@ -358,23 +376,86 @@ public class GameSimulation
         }
     }
 
-    public bool IsWonderClaimed(string wonderId)
+    public bool IsWonderClaimedByFaction(Faction faction, string wonderId)
     {
-        return CompletedWonderIds.Contains(wonderId) || CompletedSmallWonderIds.Contains(wonderId);
+        Wonder? wonder = WonderRegistry.Get(wonderId);
+        if (wonder == null) return false;
+
+        if (wonder.IsNationalWonder)
+        {
+            return GetCompletedSmallWonders(faction).Contains(wonderId);
+        }
+        else
+        {
+            return CompletedWonderIds.Contains(wonderId);
+        }
+    }
+
+    public bool AreSmallWonderPrerequisitesMet(City city, string wonderId)
+    {
+        if (DebugIgnorePrerequisites) return true;
+
+        switch (wonderId)
+        {
+            case "forbidden_palace":
+                // Requires at least 4 cities owned by this faction
+                int cityCount = Cities.Count(c => c.Faction == city.Faction);
+                return cityCount >= 4;
+
+            case "heroic_epic":
+                // Requires a Victorious Unit for this faction
+                return FactionsWithVictoriousUnit.Contains(city.Faction);
+
+            case "military_academy":
+                // Requires a Victorious Unit for this faction
+                return FactionsWithVictoriousUnit.Contains(city.Faction);
+
+            case "pentagon":
+                // Requires at least 3 military units of strength >= 2 owned by this faction
+                int milUnits = Units.Count(u => u.Faction == city.Faction && u.AttackStrength >= 2);
+                return milUnits >= 3;
+
+            case "wall_street":
+                // Requires at least 3 Banks in this faction's cities
+                int bankCount = Cities.Where(c => c.Faction == city.Faction).Sum(c => c.Buildings.Count(b => b.Id == "bank"));
+                return bankCount >= 3;
+
+            case "battlefield_medicine":
+                // Requires at least 3 Hospitals in this faction's cities
+                int hospitalCount = Cities.Where(c => c.Faction == city.Faction).Sum(c => c.Buildings.Count(b => b.Id == "hospital"));
+                return hospitalCount >= 3;
+
+            case "iron_works":
+                // Requires BOTH Iron and Coal resources inside the city's 3x3 territory/workable tiles (access)
+                return CityHasResourceAccess(city, "iron") && CityHasResourceAccess(city, "coal");
+
+            default:
+                return true;
+        }
     }
 
     public bool IsWonderAvailable(Wonder wonder)
     {
-        if (CompletedWonderIds.Contains(wonder.Id)) return false;
-        
-        if (wonder.RequiredTechId != null && !Research.IsResearched(wonder.RequiredTechId))
-            return false;
-            
-        if (wonder.RequiredResourceId != null)
+        if (IsWonderClaimedByFaction(Faction.Player, wonder.Id)) return false;
+
+        if (!DebugIgnorePrerequisites)
         {
-            var playerCityWithAccess = Cities.FirstOrDefault(c => c.Faction == Faction.Player && 
-                CityHasResourceAccess(c, wonder.RequiredResourceId));
-            if (playerCityWithAccess == null) return false;
+            if (wonder.RequiredTechId != null && !Research.IsResearched(wonder.RequiredTechId))
+                return false;
+
+            if (wonder.RequiredResourceId != null)
+            {
+                var playerCityWithAccess = Cities.FirstOrDefault(c => c.Faction == Faction.Player &&
+                    CityHasResourceAccess(c, wonder.RequiredResourceId));
+                if (playerCityWithAccess == null) return false;
+            }
+
+            if (wonder.IsNationalWonder)
+            {
+                var firstPlayerCity = Cities.FirstOrDefault(c => c.Faction == Faction.Player);
+                if (firstPlayerCity != null && !AreSmallWonderPrerequisitesMet(firstPlayerCity, wonder.Id))
+                    return false;
+            }
         }
         
         return true;
@@ -497,10 +578,27 @@ public class GameSimulation
 
         // 1. Calculate Damage to Defender (based on attack and defense ratio)
         float attStrength = Math.Max(0.5f, attacker.AttackStrength);
+        
+        // Heroic Epic effect: Attacker gets +25% attack strength globally if their faction completed it
+        bool attackerHasHeroicEpic = Cities.Any(c => c.Faction == attacker.Faction && c.Buildings.Any(b => b.Id == "heroic_epic"));
+        if (attackerHasHeroicEpic)
+        {
+            attStrength *= 1.25f;
+            Console.WriteLine($"[Heroic Epic] {attacker.Faction}'s {attacker.Type} receives +25% attack bonus!");
+        }
+
         float defStrength = Math.Max(0.5f, defender.DefenseStrength);
         if (defender.IsFortified)
         {
             defStrength *= 1.25f; // +25% defense bonus when fortified
+        }
+
+        // The Pentagon effect: Defender gets +25% defense strength globally if their faction completed it
+        bool defenderHasPentagon = Cities.Any(c => c.Faction == defender.Faction && c.Buildings.Any(b => b.Id == "pentagon"));
+        if (defenderHasPentagon)
+        {
+            defStrength *= 1.25f;
+            Console.WriteLine($"[The Pentagon] {defender.Faction}'s {defender.Type} receives +25% defense bonus!");
         }
 
         int damageToDefender = Math.Max(12, (int)(28.0f * (attStrength / defStrength)));
@@ -525,12 +623,14 @@ public class GameSimulation
             Console.WriteLine($"[Combat] {defender.Type} has been destroyed!");
             Units.Remove(defender);
 
-            // Attacker advances onto the defender's tile upon victory
+            // Attacker advances onto the defender's tile upon victory and is registered as victorious
             if (!attackerDied)
             {
                 var tile = Map.GetTile(defender.X, defender.Y)!;
                 attacker.MoveTo(defender.X, defender.Y, tile.MovementCost);
                 Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
+                
+                FactionsWithVictoriousUnit.Add(attacker.Faction);
             }
         }
 
@@ -538,6 +638,12 @@ public class GameSimulation
         {
             Console.WriteLine($"[Combat] {attacker.Type} has been destroyed in battle!");
             Units.Remove(attacker);
+            
+            // Defender wins and is registered as victorious
+            if (!defenderDied)
+            {
+                FactionsWithVictoriousUnit.Add(defender.Faction);
+            }
         }
 
         // Combat consumes all remaining movement points for the attacker
@@ -761,7 +867,7 @@ public class GameSimulation
         Cities.Clear();
         foreach (var dto in cityDtos)
         {
-            var city = new City(dto.Id, dto.Name, dto.X, dto.Y, dto.Faction, dto.CivilizationId);
+            var city = new City(dto.Id, dto.Name, dto.X, dto.Y, dto.FoundedYear, dto.Faction, dto.CivilizationId);
             city.StoredFood = dto.StoredFood;
             city.StoredProduction = dto.StoredProduction;
             city.StoredCommerce = dto.StoredCommerce;
@@ -778,8 +884,28 @@ public class GameSimulation
                 {
                     "Monument" => new Monument(),
                     "Granary" => new Granary(),
+                    "Aqueduct" => new Aqueduct(),
+                    "Hospital" => new Hospital(),
+                    "Palace" => new Palace(),
+                    "SS Cockpit" => new SSCockpit(),
+                    "SS Docking Bay" => new SSDockingBay(),
+                    "SS Engine" => new SSEngine(),
+                    "SS Exterior Casing" => new SSExteriorCasing(),
+                    "SS Fuel Cells" => new SSFuelCells(),
+                    "SS Life Support System" => new SSLifeSupportSystem(),
+                    "SS Planetary Party Lounge" => new SSPlanetaryPartyLounge(),
+                    "SS Stasis Chamber" => new SSStasisChamber(),
+                    "SS Storage/Supply" => new SSStorageSupply(),
+                    "SS Thrusters" => new SSThrusters(),
                     _ => null
                 };
+
+                if (b == null)
+                {
+                    b = BuildingRegistry.All.Values.FirstOrDefault(x => string.Equals(x.Name, bName, StringComparison.OrdinalIgnoreCase))
+                        ?? WonderRegistry.All.Values.FirstOrDefault(x => string.Equals(x.Name, bName, StringComparison.OrdinalIgnoreCase)) as Building;
+                }
+
                 if (b != null)
                 {
                     city.Buildings.Add(b);
@@ -794,6 +920,39 @@ public class GameSimulation
 
         // 5. Reconstruct Research
         Research.LoadResearchState(researchedIds, activeTechId, progress, lastTurnScience);
+
+        // 6. Reconstruct Wonder Claim and Victory State from board
+        CompletedWonderIds.Clear();
+        CompletedSmallWondersByFaction.Clear();
+        FactionsWithVictoriousUnit.Clear();
+        
+        foreach (var city in Cities)
+        {
+            foreach (var building in city.Buildings)
+            {
+                if (building is Wonder wonder)
+                {
+                    if (wonder.IsNationalWonder)
+                    {
+                        var set = GetCompletedSmallWonders(city.Faction);
+                        set.Add(wonder.Id);
+                    }
+                    else
+                    {
+                        CompletedWonderIds.Add(wonder.Id);
+                    }
+                }
+            }
+        }
+        
+        // Mark factions as victorious if they built Heroic Epic or Military Academy
+        foreach (var city in Cities)
+        {
+            if (city.Buildings.Any(b => b.Id == "heroic_epic" || b.Id == "military_academy"))
+            {
+                FactionsWithVictoriousUnit.Add(city.Faction);
+            }
+        }
     }
 
     public HashSet<(int X, int Y)> GetReachableTiles(Unit unit)
@@ -850,6 +1009,9 @@ public class GameSimulation
         // 3. Advance Worker Construction
         ProcessWorkerConstruction();
 
+        // 3.5 Apply Battlefield Medicine healing effect
+        HealWoundedUnits();
+
         TurnNumber++;
         foreach (var unit in Units)
         {
@@ -862,6 +1024,24 @@ public class GameSimulation
 
         // 4. Check for game end conditions
         CheckGameEndConditions();
+    }
+
+    private void HealWoundedUnits()
+    {
+        // For each faction, if they have Battlefield Medicine, heal their wounded units by +15 HP
+        foreach (Faction faction in Enum.GetValues<Faction>())
+        {
+            bool hasBattlefieldMedicine = Cities.Any(c => c.Faction == faction && c.Buildings.Any(b => b.Id == "battlefield_medicine"));
+            if (hasBattlefieldMedicine)
+            {
+                foreach (var unit in Units.Where(u => u.Faction == faction && u.Health < u.MaxHealth))
+                {
+                    int originalHealth = unit.Health;
+                    unit.Health = Math.Min(unit.MaxHealth, unit.Health + 15);
+                    Console.WriteLine($"[Battlefield Medicine] Healed {unit.Type} at ({unit.X}, {unit.Y}) from {originalHealth} to {unit.Health} HP.");
+                }
+            }
+        }
     }
 
     private void ProcessWorkerConstruction()
@@ -1253,6 +1433,16 @@ public class GameSimulation
                 commerce += yield.Commerce;
             }
 
+            // Apply Small Wonder modifiers
+            if (city.Buildings.Any(b => b.Id == "forbidden_palace"))
+            {
+                commerce = (int)Math.Round(commerce * 1.5f);
+            }
+            if (city.Buildings.Any(b => b.Id == "iron_works"))
+            {
+                production *= 2;
+            }
+
             // 5. Food Consumption & Growth/Starvation
             int foodConsumption = city.Population * 2;
             int netFood = food - foodConsumption;
@@ -1364,6 +1554,26 @@ public class GameSimulation
             PlayerTreasury = 0; // Cap at 0 for now (later we might disband units)
         }
 
+        // Wall Street effect: +5% interest on player's treasury (capped at 50 gold per turn)
+        bool playerHasWallStreet = Cities.Any(c => c.Faction == Faction.Player && c.Buildings.Any(b => b.Id == "wall_street"));
+        if (playerHasWallStreet && PlayerTreasury > 0)
+        {
+            int wallStreetInterest = (int)Math.Floor(PlayerTreasury * 0.05f);
+            if (wallStreetInterest > 50) wallStreetInterest = 50;
+            PlayerTreasury += wallStreetInterest;
+            goldGain += wallStreetInterest;
+            Console.WriteLine($"[Wall Street] Earned {wallStreetInterest} gold in interest!");
+        }
+
+        // Intelligence Agency effect: +10 gold per turn from spy operations
+        bool playerHasIntelAgency = Cities.Any(c => c.Faction == Faction.Player && c.Buildings.Any(b => b.Id == "intelligence_agency"));
+        if (playerHasIntelAgency)
+        {
+            PlayerTreasury += 10;
+            goldGain += 10;
+            Console.WriteLine($"[Intelligence Agency] Generated +10 gold from espionage networks!");
+        }
+
         LastTurnIncome = totalCommerceThisTurn;
         LastTurnMaintenance = totalMaintenanceThisTurn;
         LastTurnScience = scienceGain;
@@ -1452,14 +1662,12 @@ public class GameSimulation
             // Small Wonders
             ProductionProject.HeroicEpic => "heroic_epic",
             ProductionProject.MilitaryAcademy => "military_academy",
-            ProductionProject.UniversityGrounds => "university_grounds",
-            ProductionProject.BankOfAmerica => "bank_of_america",
-            ProductionProject.ForbiddenPalace => "forbidden_palace",
-            ProductionProject.MountRushmore => "mount_rushmore",
             ProductionProject.Pentagon => "pentagon",
-            ProductionProject.IntelPentagon => "intel_pentagon",
+            ProductionProject.ForbiddenPalace => "forbidden_palace",
             ProductionProject.WallStreet => "wall_street",
-            ProductionProject.HolocaustMemorial => "holocaust_memorial",
+            ProductionProject.IntelligenceAgency => "intelligence_agency",
+            ProductionProject.BattlefieldMedicine => "battlefield_medicine",
+            ProductionProject.SDIDefense => "sdi_defense",
             _ => null
         };
 
@@ -1468,9 +1676,9 @@ public class GameSimulation
             Wonder? wonder = WonderRegistry.Get(buildingId);
             Building? building = BuildingRegistry.Get(buildingId);
             
-            if (wonder != null && !IsWonderClaimed(buildingId))
+            if (wonder != null && !IsWonderClaimedByFaction(city.Faction, buildingId))
             {
-                ClaimWonder(wonder);
+                ClaimWonder(wonder, city.Faction);
                 city.Buildings.Add(wonder);
                 System.Console.WriteLine($"[Production] {city.Name} has completed building a Wonder: {wonder.Name}!");
                 wonder.OnCompleted(city, this);
@@ -1495,6 +1703,15 @@ public class GameSimulation
             };
 
             var unit = new Unit(unitId, type, city.X, city.Y, city.Faction, city.CivilizationId);
+
+            // Military Academy effect: if city has military_academy, military units start with +25% max health (125 HP instead of 100)
+            if (city.Buildings.Any(b => b.Id == "military_academy") && (type == UnitType.Warrior || type == UnitType.Archer))
+            {
+                unit.MaxHealth = 125;
+                unit.Health = 125;
+                System.Console.WriteLine($"[Military Academy] Trained elite {type} with +25% max health (125 HP)!");
+            }
+
             Units.Add(unit);
             System.Console.WriteLine($"[Production] {city.Name} has completed building a {type}!");
         }
@@ -1624,14 +1841,12 @@ public class GameSimulation
             // Small Wonders
             (production: ProductionProject.HeroicEpic, buildingId: "heroic_epic"),
             (production: ProductionProject.MilitaryAcademy, buildingId: "military_academy"),
-            (production: ProductionProject.UniversityGrounds, buildingId: "university_grounds"),
-            (production: ProductionProject.BankOfAmerica, buildingId: "bank_of_america"),
-            (production: ProductionProject.ForbiddenPalace, buildingId: "forbidden_palace"),
-            (production: ProductionProject.MountRushmore, buildingId: "mount_rushmore"),
             (production: ProductionProject.Pentagon, buildingId: "pentagon"),
-            (production: ProductionProject.IntelPentagon, buildingId: "intel_pentagon"),
+            (production: ProductionProject.ForbiddenPalace, buildingId: "forbidden_palace"),
             (production: ProductionProject.WallStreet, buildingId: "wall_street"),
-            (production: ProductionProject.HolocaustMemorial, buildingId: "holocaust_memorial"),
+            (production: ProductionProject.IntelligenceAgency, buildingId: "intelligence_agency"),
+            (production: ProductionProject.BattlefieldMedicine, buildingId: "battlefield_medicine"),
+            (production: ProductionProject.SDIDefense, buildingId: "sdi_defense"),
         };
 
         int startIndex = 0;
@@ -1656,14 +1871,25 @@ public class GameSimulation
 
             var targetBuilding = building ?? wonder;
 
-            if (targetBuilding!.RequiredTechId != null && !Research.IsResearched(targetBuilding.RequiredTechId))
+            if (!DebugIgnorePrerequisites)
+            {
+                if (targetBuilding!.RequiredTechId != null && !Research.IsResearched(targetBuilding.RequiredTechId))
+                    continue;
+
+                if (targetBuilding.RequiredResourceId != null && !CityHasResourceAccess(city, targetBuilding.RequiredResourceId))
+                    continue;
+            }
+
+            // For Wonders, check if claimed globally or by faction
+            if (wonder != null && IsWonderClaimedByFaction(city.Faction, buildingId))
                 continue;
 
-            if (targetBuilding.RequiredResourceId != null && !CityHasResourceAccess(city, targetBuilding.RequiredResourceId))
+            // Check custom prerequisites for Small Wonders
+            if (wonder != null && wonder.IsNationalWonder && !AreSmallWonderPrerequisitesMet(city, buildingId))
                 continue;
 
-            // For Wonders, check if claimed globally
-            if (wonder != null && IsWonderClaimed(buildingId))
+            // For spaceship parts, check if Apollo Program is built by this faction
+            if (buildingId.StartsWith("ss_") && !IsWonderClaimedByFaction(city.Faction, "apollo_program"))
                 continue;
 
             // For regular buildings, check if city already has it

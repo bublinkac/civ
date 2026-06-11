@@ -24,7 +24,7 @@ public class Unit
 
     // Combat Stats
     public int Health { get; set; } = 100;
-    public int MaxHealth { get; } = 100;
+    public int MaxHealth { get; set; } = 100;
     public int AttackStrength { get; }
     public int DefenseStrength { get; }
     public Faction Faction { get; set; }

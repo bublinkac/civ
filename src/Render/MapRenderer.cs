@@ -30,6 +30,11 @@ public partial class MapRenderer : TileMapLayer
     private AdvisorsMenu? _advisorsMenu;
     private TechTreePanel? _techTreePanel;
     private DomesticAdvisorPanel? _domesticAdvisorPanel;
+    private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) || 
+                                       GodotObject.IsInstanceValid(_advisorsMenu) || 
+                                       GodotObject.IsInstanceValid(_techTreePanel) || 
+                                       GodotObject.IsInstanceValid(_domesticAdvisorPanel);
+
 
     private MainMenu? _mainMenu;
 
@@ -432,9 +437,14 @@ public partial class MapRenderer : TileMapLayer
         AddChild(_camera);
     }
 
+    private bool CheckIsFullScreenUiOpen() => GodotObject.IsInstanceValid(_cityDetail) || 
+                                              GodotObject.IsInstanceValid(_advisorsMenu) || 
+                                              GodotObject.IsInstanceValid(_techTreePanel) || 
+                                              GodotObject.IsInstanceValid(_domesticAdvisorPanel);
+
     public override void _Process(double delta)
     {
-        if (_camera == null) return;
+        if (_camera == null || CheckIsFullScreenUiOpen()) return;
 
         Vector2 movement = Vector2.Zero;
 
@@ -472,7 +482,7 @@ public partial class MapRenderer : TileMapLayer
 
     public override void _UnhandledInput(InputEvent @event)
     {
-        if (_camera == null || _sim == null || _unitRenderer == null || _fogRenderer == null) return;
+        if (_camera == null || _sim == null || _unitRenderer == null || _fogRenderer == null || CheckIsFullScreenUiOpen()) return;
 
         // Block gameplay actions if the game has ended
         if (_sim.EndState != GameEndState.None) return;

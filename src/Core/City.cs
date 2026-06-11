@@ -84,14 +84,12 @@ public enum ProductionProject
         // Small Wonders
         HeroicEpic,
         MilitaryAcademy,
-        UniversityGrounds,
-        BankOfAmerica,
-        ForbiddenPalace,
-        MountRushmore,
         Pentagon,
-        IntelPentagon,
+        ForbiddenPalace,
         WallStreet,
-        HolocaustMemorial
+        IntelligenceAgency,
+        BattlefieldMedicine,
+        SDIDefense
     }
 
 public enum CityType
@@ -108,6 +106,7 @@ public class City
     public int X { get; }
     public int Y { get; }
     public int VisionRange { get; } = 2;
+    public int FoundedYear { get; }
 
     public CityType Type { get; private set; } = CityType.Town;
     public Faction Faction { get; set; }
@@ -157,12 +156,13 @@ public class City
         };
     }
 
-    public City(string id, string name, int x, int y, Faction faction = Faction.Player, string? civilizationId = null)
+    public City(string id, string name, int x, int y, int foundedYear, Faction faction = Faction.Player, string? civilizationId = null)
     {
         Id = id;
         Name = name;
         X = x;
         Y = y;
+        FoundedYear = foundedYear;
         Faction = faction;
         CivilizationId = civilizationId;
     }
@@ -270,14 +270,12 @@ public class City
             // Small Wonders
             ProductionProject.HeroicEpic => "heroic_epic",
             ProductionProject.MilitaryAcademy => "military_academy",
-            ProductionProject.UniversityGrounds => "university_grounds",
-            ProductionProject.BankOfAmerica => "bank_of_america",
-            ProductionProject.ForbiddenPalace => "forbidden_palace",
-            ProductionProject.MountRushmore => "mount_rushmore",
             ProductionProject.Pentagon => "pentagon",
-            ProductionProject.IntelPentagon => "intel_pentagon",
+            ProductionProject.ForbiddenPalace => "forbidden_palace",
             ProductionProject.WallStreet => "wall_street",
-            ProductionProject.HolocaustMemorial => "holocaust_memorial",
+            ProductionProject.IntelligenceAgency => "intelligence_agency",
+            ProductionProject.BattlefieldMedicine => "battlefield_medicine",
+            ProductionProject.SDIDefense => "sdi_defense",
             _ => null
         };
         if (buildingId == null) return 0;

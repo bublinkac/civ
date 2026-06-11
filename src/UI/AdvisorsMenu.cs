@@ -8,6 +8,7 @@ public partial class AdvisorsMenu : PanelContainer
 {
     public event Action? OnOpenScienceAdvisor;
     public event Action? OnOpenDomesticAdvisor;
+    public event Action? OnOpenMilitaryAdvisor;
     
     public AdvisorsMenu()
     {
@@ -62,10 +63,11 @@ public partial class AdvisorsMenu : PanelContainer
         };
         vbox.AddChild(scienceBtn);
 
-        // Placeholder Advisors
         var militaryBtn = CreateAdvisorButton("⚔️ MILITARY ADVISOR", new Color(0.45f, 0.15f, 0.15f));
-        militaryBtn.Disabled = true; // Not implemented yet
-        militaryBtn.TooltipText = "Consult with your Generals about military status (Coming Soon)";
+        militaryBtn.Pressed += () => {
+            OnOpenMilitaryAdvisor?.Invoke();
+            QueueFree();
+        };
         vbox.AddChild(militaryBtn);
 
         var domesticBtn = CreateAdvisorButton("🏛️ DOMESTIC ADVISOR", new Color(0.15f, 0.45f, 0.15f));

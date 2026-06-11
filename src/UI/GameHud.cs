@@ -339,11 +339,23 @@ public partial class GameHud : CanvasLayer
         };
         vboxMenu.AddChild(loadBtn);
 
+        var debugBtn = CreateStyledButton("🔧 DEBUG: Ignore Prerequisites", new Color(0.5f, 0.2f, 0.5f));
+        debugBtn.Pressed += () => {
+            GameSimulation.DebugIgnorePrerequisites = !GameSimulation.DebugIgnorePrerequisites;
+            debugBtn.Text = GameSimulation.DebugIgnorePrerequisites
+                ? "🔧 DEBUG: Prerequisites IGNORED (ON)"
+                : "🔧 DEBUG: Ignore Prerequisites (OFF)";
+            ShowInfoPopup("DEBUG MODE", GameSimulation.DebugIgnorePrerequisites
+                ? "All building/wonder prerequisites are now IGNORED. You can build anything!"
+                : "All building/wonder prerequisites are now ENFORCED normally.");
+        };
+        vboxMenu.AddChild(debugBtn);
+
         var restartBtn = CreateStyledButton("Restart Map", new Color(0.15f, 0.4f, 0.15f));
         restartBtn.Pressed += () => {
             ShowConfirmation(
-                "RESTART MAP", 
-                "Are you sure you want to restart the map?\nThe entire current map and progress will be permanently lost.", 
+                "RESTART MAP",
+                "Are you sure you want to restart the map?\nThe entire current map and progress will be permanently lost.",
                 () => {
                     _gameMenuModal.Visible = false;
                     GetTree().ReloadCurrentScene();

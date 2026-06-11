@@ -10,7 +10,7 @@ public abstract class Wonder : Building
     
     public override void OnCompleted(City city, GameSimulation sim)
     {
-        sim.ClaimWonder(this);
+        sim.ClaimWonder(this, city.Faction);
         System.Console.WriteLine($"[Wonder] The {Name} has been completed in {city.Name}!");
     }
     
@@ -69,8 +69,6 @@ public static class WonderRegistry
             "Doubles science output in city. +2 culture."));
         Register(new GenericWonder("hermitage", "Hermitage", 500, null,
             "Makes 2 citizens happy. +2 culture. Increases cultural expansion."));
-        Register(new GenericWonder("iron_works", "Iron Works", 400, null,
-            "Doubles shield production in city. +2 culture."));
         Register(new GenericWonder("smith_mansion", "Smith's Mansion", 400, null,
             "Bank generates 5 gold. Stock Exchange generates 10 gold. +2 culture."));
         Register(new GenericWonder("train_station", "Train Station", 600, null,
@@ -79,8 +77,6 @@ public static class WonderRegistry
             "Diplomatic victory possible. +3 culture."));
 
         // Modern Era Wonders
-        Register(new GenericWonder("apollo_program", "Apollo Program", 800, null,
-            "Reveals entire map. +2 culture."));
         Register(new GenericWonder("manhattan_project", "Manhattan Project", 800, null,
             "Nuclear weapons available to all. +2 culture."));
         Register(new GenericWonder("internet", "Internet", 800, null,
@@ -95,26 +91,26 @@ public static class WonderRegistry
             "Counts as global communications. +3 culture."));
 
         // Small Wonders (National Wonders)
-        Register(new GenericSmallWonder("heroic_epic", "Heroic Epic", 200, "iron_working",
-            "Military unit barracks effect in this city. Required to build military units here."));
+        Register(new GenericSmallWonder("heroic_epic", "Heroic Epic", 200, "literature",
+            "Increases attacker's combat strength by +25% globally. Requires a Victorious Unit."));
         Register(new GenericSmallWonder("military_academy", "Military Academy", 300, "military_tradition",
-            "All units built here as elite. +1 culture."));
-        Register(new GenericSmallWonder("university_grounds", "University Grounds", 200, "education",
-            "University effect in this city. Required for university."));
-        Register(new GenericSmallWonder("bank_of_america", "Bank of America", 300, "the_corporation",
-            "Bank effect in this city."));
+            "Units built in this city start with +25% max health. Requires a Victorious Unit."));
+        Register(new GenericSmallWonder("pentagon", "The Pentagon", 400, "military_tradition",
+            "All units receive a +25% defense bonus globally. Requires 3 military units of strength >= 2."));
         Register(new GenericSmallWonder("forbidden_palace", "Forbidden Palace", 300, "code_of_laws",
-            "Reduces corruption in all your cities. Can only be built in cities without a Palace."));
-        Register(new GenericSmallWonder("mount_rushmore", "Mount Rushmore", 400, "mass_production",
-            "Makes 2 citizens happy in this city. +2 culture."));
-        Register(new GenericSmallWonder("pentagon", "Pentagon", 400, "iron_working",
-            "All units built here as veterans. +2 culture."));
-        Register(new GenericSmallWonder("intel_pentagon", "Intelligence Agency", 400, "espionage",
-            "Enables CIA/Surveillance outcomes. +2 culture."));
+            "Acts as a second Palace. Grants city +50% commerce bonus. Requires at least 4 cities."));
         Register(new GenericSmallWonder("wall_street", "Wall Street", 600, "the_corporation",
-            "Stock Exchange effect in this city. +3 culture."));
-        Register(new GenericSmallWonder("holocaust_memorial", "Holocaust Memorial", 200, "theology",
-            "Makes 2 citizens happy in this city. Eliminates war weariness. +2 culture."));
+            "Generates 5% interest on treasury up to 50 gold per turn. Requires 3 Banks."));
+        Register(new GenericSmallWonder("intelligence_agency", "Intelligence Agency", 400, "espionage",
+            "Spy network generates +10 gold per turn."));
+        Register(new GenericSmallWonder("battlefield_medicine", "Battlefield Medicine", 400, "medicine",
+            "Heals all wounded units by +15 HP at the end of each turn. Requires 3 Hospitals."));
+        Register(new GenericSmallWonder("sdi_defense", "SDI Defense", 500, "superconductor",
+            "Star Wars shield grants +100% defense bonus in this city."));
+        Register(new GenericSmallWonder("apollo_program", "Apollo Program", 800, "space_flight",
+            "Enables construction of spaceship components."));
+        Register(new GenericSmallWonder("iron_works", "Iron Works", 400, "steam_power",
+            "Doubles production in this city. Requires both Iron and Coal resources in workable tiles."));
     }
 
     private static void Register(Wonder wonder) => All[wonder.Id] = wonder;

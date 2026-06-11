@@ -98,6 +98,7 @@ public class JsonSaveSystem : ISaveSystem
                 StoredCommerce = city.StoredCommerce,
                 Population = city.Population,
                 LastTurnNetFood = city.LastTurnNetFood,
+                FoundedYear = city.FoundedYear,
                 CurrentProject = city.CurrentProject,
                 CurrentProductionProgress = city.CurrentProductionProgress,
                 Faction = city.Faction,
