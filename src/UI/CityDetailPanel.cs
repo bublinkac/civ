@@ -105,7 +105,7 @@ public partial class CityDetailPanel : PanelContainer
         bottomHBox.AddChild(economyComp);
 
         // Right Panel: Production queue & yield splits
-        var productionComp = new CityProductionQueueComponent(_city, _sim);
+        var productionComp = new CityProductionQueueComponent(_city, _sim, () => CreateLayout());
         bottomHBox.AddChild(productionComp);
     }
 

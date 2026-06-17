@@ -107,7 +107,40 @@ public partial class MapRenderer : TileMapLayer
             _mainMenu = null;
             StartGame(width, height, seed);
         };
+        _mainMenu.OnLoadGame += () =>
+        {
+            _mainMenu.QueueFree();
+            _mainMenu = null;
+            LoadSavedGame();
+        };
         GetParent().CallDeferred(Node.MethodName.AddChild, _mainMenu);
+    }
+
+    private void LoadSavedGame()
+    {
+        ISaveSystem saveSystem = new JsonSaveSystem();
+        var loadedSim = saveSystem.LoadAndReconstruct("save_slot_1");
+        if (loadedSim == null)
+        {
+            GD.PrintErr("[MapRenderer] Failed to load and reconstruct saved game!");
+            return;
+        }
+
+        _sim = loadedSim;
+        MapWidth = _sim.Map.Width;
+        MapHeight = _sim.Map.Height;
+
+        // 3. Programmatically configure TileSet for Isometric layout
+        SetupTileSet();
+
+        // 4. Render GameMap to TileMapLayer cells
+        RenderMap();
+
+        // 5. Spawn peer rendering layers (Fog and Units)
+        SetupPeerRenderers();
+
+        // 6. Setup Controllable Camera and focus on starting unit
+        SetupCamera();
     }
 
     private void StartGame(int width, int height, int seed)

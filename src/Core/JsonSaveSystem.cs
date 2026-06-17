@@ -108,6 +108,7 @@ public class JsonSaveSystem : ISaveSystem
                 FoundedYear = city.FoundedYear,
                 CurrentProject = city.CurrentProject,
                 CurrentProductionProgress = city.CurrentProductionProgress,
+                ProductionQueue = city.ProductionQueue.ToList(),
                 WorkedTiles = city.WorkedTiles.Select(t => $"{t.X},{t.Y}").ToList(),
                 Faction = city.Faction,
                 CivilizationId = city.CivilizationId
@@ -216,5 +217,49 @@ public class JsonSaveSystem : ISaveSystem
     {
         string path = GetSavePath(slotName);
         return File.Exists(path);
+    }
+
+    public GameSimulation? LoadAndReconstruct(string slotName)
+    {
+        string path = GetSavePath(slotName);
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"[Save System] LoadAndReconstruct failed: Save file does not exist at {path}");
+            return null;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(path);
+            var dto = JsonSerializer.Deserialize<SaveDataDto>(json);
+            if (dto == null || dto.Tiles.Count == 0) return null;
+
+            int width = dto.Tiles.Max(t => t.X) + 1;
+            int height = dto.Tiles.Max(t => t.Y) + 1;
+
+            var map = new GameMap(width, height);
+            
+            // Pre-fill map tiles so they are not null before reconstruction
+            var grassland = TerrainRegistry.Get("grassland") ?? TerrainRegistry.All.Values.First();
+            for (int x = 0; x < width; x++)
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    map.SetTile(x, y, new TileData(x, y, grassland));
+                }
+            }
+
+            var sim = new GameSimulation(map);
+
+            if (Load(slotName, sim))
+            {
+                return sim;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Save System] Failed to reconstruct loaded game: {ex.Message}");
+        }
+        return null;
     }
 }

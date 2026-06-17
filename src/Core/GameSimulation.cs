@@ -888,6 +888,11 @@ public class GameSimulation
             city.LastTurnNetFood = dto.LastTurnNetFood;
             city.CurrentProject = dto.CurrentProject;
             city.CurrentProductionProgress = dto.CurrentProductionProgress;
+            if (dto.ProductionQueue != null)
+            {
+                city.ProductionQueue.Clear();
+                city.ProductionQueue.AddRange(dto.ProductionQueue);
+            }
             city.UpdateCityType();
 
             // Reconstruct Worked Tiles
@@ -1744,8 +1749,18 @@ public class GameSimulation
             System.Console.WriteLine($"[Production] {city.Name} has completed building a {type}!");
         }
 
-        city.CurrentProject = ProductionProject.None;
-        city.CurrentProductionProgress = 0;
+        if (city.ProductionQueue.Count > 0)
+        {
+            var nextProject = city.ProductionQueue[0];
+            city.ProductionQueue.RemoveAt(0);
+            city.CurrentProject = nextProject;
+            System.Console.WriteLine($"[Production] {city.Name} started next queued project: {nextProject}!");
+        }
+        else
+        {
+            city.CurrentProject = ProductionProject.None;
+            city.CurrentProductionProgress = 0;
+        }
     }
 
     // Helper to check if city has access to a strategic resource

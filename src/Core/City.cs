@@ -126,6 +126,7 @@ public class City
     // Production queue
     public ProductionProject CurrentProject { get; set; } = ProductionProject.None;
     public int CurrentProductionProgress { get; set; }
+    public System.Collections.Generic.List<ProductionProject> ProductionQueue { get; } = new();
 
     // Completed Buildings
     public System.Collections.Generic.List<Building> Buildings { get; } = new();

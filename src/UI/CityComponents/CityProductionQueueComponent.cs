@@ -1,14 +1,21 @@
 using Godot;
 using CivGame.Core;
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using TileData = CivGame.Core.TileData;
 
 namespace CivGame.UI.CityComponents;
 
 public partial class CityProductionQueueComponent : PanelContainer
 {
-    public CityProductionQueueComponent(City city, GameSimulation sim)
+    private Action? _onProjectChanged;
+    private int _baseProd;
+
+    public CityProductionQueueComponent(City city, GameSimulation sim, Action? onProjectChanged = null)
     {
+        _onProjectChanged = onProjectChanged;
+
         // Parchment styled box
         var style = new StyleBoxFlat
         {
@@ -53,21 +60,68 @@ public partial class CityProductionQueueComponent : PanelContainer
             baseComm += centerTile.TotalYield.Commerce;
         }
 
-        // Surrounding worked tiles
-        foreach (var tilePos in city.WorkedTiles)
+        // Surrounding worked tiles (match simulation logic: manual + auto-fill to population)
+        var workingTiles = new List<TileData>();
+
+        if (city.WorkedTiles.Count > 0)
         {
-            var t = sim.Map.GetTile(tilePos.X, tilePos.Y);
-            if (t != null && t.OwnerCityId == city.Id)
+            foreach (var tilePos in city.WorkedTiles)
             {
-                baseFood += t.TotalYield.Food;
-                baseProd += t.TotalYield.Production;
-                baseComm += t.TotalYield.Commerce;
+                var t = sim.Map.GetTile(tilePos.X, tilePos.Y);
+                if (t != null && t.OwnerCityId == city.Id)
+                {
+                    workingTiles.Add(t);
+                }
             }
+        }
+
+        if (workingTiles.Count < city.Population)
+        {
+            var potentialTiles = new List<TileData>();
+            int radius = 1;
+            var used = new HashSet<(int X, int Y)>(city.WorkedTiles.Select(w => (w.X, w.Y)));
+
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int tx = city.X + dx;
+                    int ty = city.Y + dy;
+                    if (!sim.Map.IsInBounds(tx, ty)) continue;
+
+                    var tile = sim.Map.GetTile(tx, ty);
+                    if (tile != null && tile.OwnerCityId == city.Id && !used.Contains((tx, ty)))
+                    {
+                        potentialTiles.Add(tile);
+                    }
+                }
+            }
+
+            potentialTiles.Sort((a, b) =>
+                (b.TotalYield.Food + b.TotalYield.Production + b.TotalYield.Commerce)
+                .CompareTo(a.TotalYield.Food + a.TotalYield.Production + a.TotalYield.Commerce)
+            );
+
+            int needed = city.Population - workingTiles.Count;
+            for (int i = 0; i < Math.Min(needed, potentialTiles.Count); i++)
+            {
+                workingTiles.Add(potentialTiles[i]);
+            }
+        }
+
+        foreach (var tile in workingTiles)
+        {
+            baseFood += tile.TotalYield.Food;
+            baseProd += tile.TotalYield.Production;
+            baseComm += tile.TotalYield.Commerce;
         }
 
         // Apply Wonder/Small Wonder multipliers
         if (city.Buildings.Any(b => b.Id == "forbidden_palace")) baseComm = (int)Math.Round(baseComm * 1.5f);
         if (city.Buildings.Any(b => b.Id == "iron_works")) baseProd *= 2;
+
+        _baseProd = baseProd;
 
         int foodConsumption = city.Population * 2;
         int netFood = baseFood - foodConsumption;
@@ -175,17 +229,20 @@ public partial class CityProductionQueueComponent : PanelContainer
         };
         var frame = new PanelContainer();
         frame.AddThemeStyleboxOverride("panel", projFrameStyle);
+        frame.MouseDefaultCursorShape = CursorShape.PointingHand;
         rightCol.AddChild(frame);
 
         var frameVBox = new VBoxContainer();
         frameVBox.AddThemeConstantOverride("separation", 4);
         frameVBox.Alignment = BoxContainer.AlignmentMode.Center;
+        frameVBox.MouseFilter = Control.MouseFilterEnum.Ignore;
         frame.AddChild(frameVBox);
 
         var activeTitle = new Label { Text = "BUILDING PROJECT" };
         activeTitle.AddThemeFontSizeOverride("font_size", 10);
         activeTitle.AddThemeColorOverride("font_color", new Color(0.4f, 0.35f, 0.25f));
         activeTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        activeTitle.MouseFilter = Control.MouseFilterEnum.Ignore;
         frameVBox.AddChild(activeTitle);
 
         if (city.CurrentProject == ProductionProject.None)
@@ -194,11 +251,13 @@ public partial class CityProductionQueueComponent : PanelContainer
             idleLabel.AddThemeFontSizeOverride("font_size", 16);
             idleLabel.AddThemeColorOverride("font_color", new Color(0.45f, 0.45f, 0.5f));
             idleLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            idleLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
             frameVBox.AddChild(idleLabel);
 
-            var idleDesc = new Label { Text = "Select Project to Begin" };
+            var idleDesc = new Label { Text = "Click to Choose" };
             idleDesc.AddThemeFontSizeOverride("font_size", 9);
             idleDesc.HorizontalAlignment = HorizontalAlignment.Center;
+            idleDesc.MouseFilter = Control.MouseFilterEnum.Ignore;
             frameVBox.AddChild(idleDesc);
         }
         else
@@ -207,13 +266,33 @@ public partial class CityProductionQueueComponent : PanelContainer
             projName.AddThemeFontSizeOverride("font_size", 13);
             projName.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.12f));
             projName.HorizontalAlignment = HorizontalAlignment.Center;
+            projName.MouseFilter = Control.MouseFilterEnum.Ignore;
             frameVBox.AddChild(projName);
 
-            // Project Icon/Graphic
-            var graphic = new Label { Text = getProjectEmoji(city.CurrentProject) };
-            graphic.AddThemeFontSizeOverride("font_size", 34);
-            graphic.HorizontalAlignment = HorizontalAlignment.Center;
-            frameVBox.AddChild(graphic);
+            // Project Icon/Graphic: Load high-resolution texture or fallback to emoji
+            var tex = GetProjectTexture(city.CurrentProject);
+            if (tex != null)
+            {
+                var textureRect = new TextureRect
+                {
+                    Texture = tex,
+                    CustomMinimumSize = new Vector2(64, 64),
+                    ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                    SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    MouseFilter = Control.MouseFilterEnum.Ignore
+                };
+                frameVBox.AddChild(textureRect);
+            }
+            else
+            {
+                var graphic = new Label { Text = getProjectEmoji(city.CurrentProject) };
+                graphic.AddThemeFontSizeOverride("font_size", 34);
+                graphic.HorizontalAlignment = HorizontalAlignment.Center;
+                graphic.MouseFilter = Control.MouseFilterEnum.Ignore;
+                frameVBox.AddChild(graphic);
+            }
 
             int cost = city.GetProjectCost(city.CurrentProject);
             int progress = city.CurrentProductionProgress;
@@ -223,25 +302,197 @@ public partial class CityProductionQueueComponent : PanelContainer
             timeLabel.AddThemeFontSizeOverride("font_size", 10);
             timeLabel.AddThemeColorOverride("font_color", new Color(0.12f, 0.4f, 0.15f));
             timeLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            timeLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
             frameVBox.AddChild(timeLabel);
 
-            // Progress bar
-            var bar = new ProgressBar();
-            bar.MinValue = 0;
-            bar.MaxValue = cost;
-            bar.Value = progress;
-            bar.CustomMinimumSize = new Vector2(0, 14);
-            bar.ShowPercentage = true;
-            frameVBox.AddChild(bar);
+            // 3D-styled Empty Shield Slots Grid (Civ3 Style)
+            // Determine scale: 1 slot = 'shieldStep' shields
+            int shieldStep = 1;
+            if (cost > 100)
+            {
+                shieldStep = 10;
+            }
+            else if (cost > 50)
+            {
+                shieldStep = 5;
+            }
+            
+            int totalSlots = (int)Math.Ceiling((double)cost / shieldStep);
+            int filledSlots = (int)Math.Floor((double)progress / shieldStep);
+            
+            var gridContainer = new GridContainer();
+            gridContainer.Columns = 10;
+            gridContainer.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+            gridContainer.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            gridContainer.AddThemeConstantOverride("h_separation", 2);
+            gridContainer.AddThemeConstantOverride("v_separation", 2);
+            
+            for (int i = 0; i < totalSlots; i++)
+            {
+                var slot = new PanelContainer();
+                slot.CustomMinimumSize = new Vector2(14, 14);
+                
+                // Recessed empty tile style
+                var emptyStyle = new StyleBoxFlat
+                {
+                    BgColor = new Color(0.82f, 0.77f, 0.67f, 0.9f), // parchment stone recessed
+                    BorderWidthLeft = 1, BorderWidthTop = 1, BorderWidthRight = 1, BorderWidthBottom = 1,
+                    BorderColor = new Color(0.5f, 0.45f, 0.35f, 0.7f), // dark borders
+                    CornerRadiusTopLeft = 1, CornerRadiusTopRight = 1, CornerRadiusBottomLeft = 1, CornerRadiusBottomRight = 1
+                };
+                
+                slot.AddThemeStyleboxOverride("panel", emptyStyle);
+                
+                if (i < filledSlots)
+                {
+                    var shieldLabel = new Label { Text = "🛡️" };
+                    shieldLabel.AddThemeFontSizeOverride("font_size", 9);
+                    shieldLabel.HorizontalAlignment = HorizontalAlignment.Center;
+                    shieldLabel.VerticalAlignment = VerticalAlignment.Center;
+                    shieldLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
+                    slot.AddChild(shieldLabel);
+                }
+                
+                gridContainer.AddChild(slot);
+            }
+            
+            frameVBox.AddChild(gridContainer);
 
             var progressLabel = new Label { Text = $"{progress}/{cost} Shields" };
             progressLabel.AddThemeFontSizeOverride("font_size", 9);
+            progressLabel.AddThemeColorOverride("font_color", new Color(0.45f, 0.36f, 0.22f));
             progressLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            progressLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
             frameVBox.AddChild(progressLabel);
+        }
+
+        // Handle clicking on the card
+        frame.GuiInput += (InputEvent @event) =>
+        {
+            if (@event is InputEventMouseButton mouseEvent && mouseEvent.Pressed && mouseEvent.ButtonIndex == MouseButton.Left)
+            {
+                var dialog = new CityProductionSelectionDialog(city, sim, _baseProd, () => _onProjectChanged?.Invoke());
+                GetTree().Root.AddChild(dialog);
+            }
+        };
+
+        // ==========================================
+        // QUEUE PANEL (Civ3 style "QUEUE (hold 'Shift' to add)")
+        // ==========================================
+        var queueSpacer = new Control { CustomMinimumSize = new Vector2(0, 4) };
+        rightCol.AddChild(queueSpacer);
+
+        var queueStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.92f, 0.89f, 0.79f, 0.95f), // Parchment background
+            BorderWidthLeft = 1, BorderWidthTop = 1, BorderWidthRight = 1, BorderWidthBottom = 1,
+            BorderColor = new Color(0.5f, 0.42f, 0.3f, 0.6f),
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
+        };
+        var queuePanel = new PanelContainer();
+        queuePanel.AddThemeStyleboxOverride("panel", queueStyle);
+        queuePanel.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        rightCol.AddChild(queuePanel);
+
+        var queueVBox = new VBoxContainer();
+        queueVBox.AddThemeConstantOverride("separation", 2);
+        queuePanel.AddChild(queueVBox);
+
+        var queueTitle = new Label { Text = "QUEUE (hold 'Shift' to add)" };
+        queueTitle.AddThemeFontSizeOverride("font_size", 9);
+        queueTitle.AddThemeColorOverride("font_color", new Color(0.35f, 0.28f, 0.18f));
+        queueTitle.HorizontalAlignment = HorizontalAlignment.Center;
+        queueVBox.AddChild(queueTitle);
+        
+        queueVBox.AddChild(new HSeparator());
+
+        var scroll = new ScrollContainer();
+        scroll.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        queueVBox.AddChild(scroll);
+
+        var listVBox = new VBoxContainer();
+        listVBox.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        listVBox.AddThemeConstantOverride("separation", 3);
+        scroll.AddChild(listVBox);
+
+        if (city.ProductionQueue.Count == 0)
+        {
+            var emptyLabel = new Label { Text = "2. Empty Slot" };
+            emptyLabel.AddThemeFontSizeOverride("font_size", 10);
+            emptyLabel.AddThemeColorOverride("font_color", new Color(0.2f, 0.5f, 0.8f)); // Soft blue like screenshot
+            listVBox.AddChild(emptyLabel);
+        }
+        else
+        {
+            for (int i = 0; i < city.ProductionQueue.Count; i++)
+            {
+                var queuedProj = city.ProductionQueue[i];
+                int indexInQueue = i + 2; // e.g. 2. Settler, 3. Worker
+                
+                var itemHBox = new HBoxContainer();
+                itemHBox.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+                listVBox.AddChild(itemHBox);
+
+                // Small icon (zmenšený)
+                var queuedTex = GetProjectTexture(queuedProj);
+                if (queuedTex != null)
+                {
+                    var miniIcon = new TextureRect
+                    {
+                        Texture = queuedTex,
+                        CustomMinimumSize = new Vector2(20, 20),
+                        ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                        StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                        SizeFlagsVertical = Control.SizeFlags.ShrinkCenter
+                    };
+                    itemHBox.AddChild(miniIcon);
+                }
+                else
+                {
+                    var miniEmoji = new Label { Text = getProjectEmoji(queuedProj) };
+                    miniEmoji.AddThemeFontSizeOverride("font_size", 11);
+                    miniEmoji.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+                    itemHBox.AddChild(miniEmoji);
+                }
+
+                // Name and index
+                string projName = queuedProj.ToString();
+                var nameLabel = new Label { Text = $"{indexInQueue}. {projName}" };
+                nameLabel.AddThemeFontSizeOverride("font_size", 10);
+                nameLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.12f));
+                nameLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+                itemHBox.AddChild(nameLabel);
+
+                // Calculate turns remaining in queue
+                int qCost = city.GetProjectCost(queuedProj);
+                int qTurns = baseProd > 0 ? (int)Math.Ceiling((double)qCost / baseProd) : 9999;
+                var turnsText = qTurns == 9999 ? "Never" : $"{qTurns} turn{(qTurns == 1 ? "" : "s")}";
+                
+                var turnsLabel = new Label { Text = turnsText };
+                turnsLabel.AddThemeFontSizeOverride("font_size", 9);
+                turnsLabel.AddThemeColorOverride("font_color", new Color(0.3f, 0.3f, 0.3f));
+                itemHBox.AddChild(turnsLabel);
+
+                // A tiny delete button to remove from queue
+                var delButton = new Button { Text = "×" };
+                delButton.AddThemeFontSizeOverride("font_size", 9);
+                delButton.AddThemeColorOverride("font_color", new Color(0.7f, 0.2f, 0.2f));
+                delButton.Flat = true;
+                delButton.FocusMode = FocusModeEnum.None;
+                
+                int itemIdx = i; // local copy for closure
+                delButton.Pressed += () =>
+                {
+                    city.ProductionQueue.RemoveAt(itemIdx);
+                    _onProjectChanged?.Invoke(); // Refresh layout!
+                };
+                itemHBox.AddChild(delButton);
+            }
         }
     }
 
-    private string getProjectEmoji(ProductionProject proj)
+    internal static string getProjectEmoji(ProductionProject proj)
     {
         string name = proj.ToString().ToLower();
         if (name.Contains("settler")) return "🧑‍🤝‍🧑";
@@ -262,5 +513,45 @@ public partial class CityProductionQueueComponent : PanelContainer
         if (name.Contains("academy")) return "🎖️";
         if (name.Contains("pentagon")) return "🛑";
         return "🏢";
+    }
+
+    internal static Texture2D? GetProjectTexture(ProductionProject proj)
+    {
+        string? baseName = proj switch
+        {
+            ProductionProject.Explorer => "explorer",
+            ProductionProject.Settler => "settler",
+            ProductionProject.Worker => "worker",
+            ProductionProject.Warrior => "warrior",
+            ProductionProject.Archer => "archer",
+            _ => null
+        };
+
+        if (baseName == null) return null;
+
+        // Try to load original webp first, then fallback to png
+        string origPath = $"res://assets/{baseName}_orig.webp";
+        if (ResourceLoader.Exists(origPath))
+        {
+            try
+            {
+                var tex = GD.Load<Texture2D>(origPath);
+                if (tex != null) return tex;
+            }
+            catch {}
+        }
+
+        string pngPath = $"res://assets/{baseName}.png";
+        if (ResourceLoader.Exists(pngPath))
+        {
+            try
+            {
+                var tex = GD.Load<Texture2D>(pngPath);
+                if (tex != null) return tex;
+            }
+            catch {}
+        }
+
+        return null;
     }
 }

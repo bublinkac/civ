@@ -7,6 +7,7 @@ public interface ISaveSystem
     void Save(string slotName, GameSimulation sim);
     bool Load(string slotName, GameSimulation sim);
     bool SaveExists(string slotName);
+    GameSimulation? LoadAndReconstruct(string slotName);
 }
 
 // -------------------------------------------------------------
@@ -53,6 +54,7 @@ public class CitySaveDto
     public int FoundedYear { get; set; }
     public ProductionProject CurrentProject { get; set; }
     public int CurrentProductionProgress { get; set; }
+    public List<ProductionProject> ProductionQueue { get; set; } = new();
     public List<string> BuildingNames { get; set; } = new();
     public List<string> WorkedTiles { get; set; } = new(); // format: "x,y"
     public Faction Faction { get; set; }
