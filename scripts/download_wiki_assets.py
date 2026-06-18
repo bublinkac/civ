@@ -257,9 +257,10 @@ def get_interactive_inputs():
     print("1. Units (List of units in Civ3)")
     print("2. Buildings & Wonders (List of buildings in Civ3 / Wonders)")
     print("3. Technologies (Technology tree / Techs in Civ3)")
-    print("4. Custom URL")
+    print("4. Terrains (List of terrains in Civ3)")
+    print("5. Custom URL")
     
-    choice = input("Select option (1-4): ").strip()
+    choice = input("Select option (1-5): ").strip()
     
     url = ""
     asset_type = "generic"
@@ -273,6 +274,9 @@ def get_interactive_inputs():
     elif choice == "3":
         url = "https://civilization.fandom.com/wiki/List_of_advances_in_Civ3"
         asset_type = "technologies"
+    elif choice == "4":
+        url = "https://civilization.fandom.com/wiki/List_of_terrains_in_Civ3"
+        asset_type = "terrains"
     else:
         url = input("Enter custom Civilization Fandom Wiki URL: ").strip()
         asset_type = input("Enter asset type (e.g. units, buildings, tech, terrain, generic): ").strip().lower()

@@ -189,6 +189,29 @@ public partial class CityProductionQueueComponent : PanelContainer
         sciPartLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.45f, 0.55f));
         commSplit.AddChild(sciPartLabel);
 
+        // --- 3b. CORRUPTION & WASTE ---
+        if (city.LastTurnCorruption > 0 || city.LastTurnWaste > 0)
+        {
+            var cwBox = new HBoxContainer();
+            cwBox.AddThemeConstantOverride("separation", 10);
+            leftCol.AddChild(cwBox);
+
+            if (city.LastTurnWaste > 0)
+            {
+                var wasteLabel = new Label { Text = $"Waste: -{city.LastTurnWaste}" };
+                wasteLabel.AddThemeFontSizeOverride("font_size", 10);
+                wasteLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.15f, 0.15f));
+                cwBox.AddChild(wasteLabel);
+            }
+            if (city.LastTurnCorruption > 0)
+            {
+                var corrLabel = new Label { Text = $"Corruption: -{city.LastTurnCorruption}" };
+                corrLabel.AddThemeFontSizeOverride("font_size", 10);
+                corrLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.15f, 0.15f));
+                cwBox.AddChild(corrLabel);
+            }
+        }
+
         // --- 4. GRANARY PREVIEW ---
         var granBox = new VBoxContainer();
         granBox.AddThemeConstantOverride("separation", 2);

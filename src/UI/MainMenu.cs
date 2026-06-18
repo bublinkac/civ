@@ -12,8 +12,8 @@ namespace CivGame.UI;
 /// </summary>
 public partial class MainMenu : CanvasLayer
 {
-    /// <summary>Fired when the player clicks START GAME. Args: width, height, seed.</summary>
-    public event Action<int, int, int>? OnStartGame;
+    /// <summary>Fired when the player clicks START GAME. Args: width, height, seed, playerCivId, aiCivId.</summary>
+    public event Action<int, int, int, string, string>? OnStartGame;
 
     /// <summary>Fired when the player chooses to load an existing save.</summary>
     public event Action? OnLoadGame;
@@ -34,6 +34,8 @@ public partial class MainMenu : CanvasLayer
     private Label? _descriptionLabel;
     private Label? _dimensionsLabel;
     private SpinBox? _seedInput;
+    private OptionButton? _playerCivInput;
+    private OptionButton? _aiCivInput;
 
     // Containers for different screens
     private Control? _titleScreenContainer;
@@ -344,12 +346,12 @@ public partial class MainMenu : CanvasLayer
         _sizeButtons = new Button[MapSizes.Length];
         for (int i = 0; i < MapSizes.Length; i++)
         {
-            int idx = i; // capture for closure
+            int sizeIdx = i; // capture for closure
             var btn = new Button();
             btn.Text = MapSizes[i].Name;
             btn.CustomMinimumSize = new Vector2(95, 42);
             btn.AddThemeFontSizeOverride("font_size", 14);
-            btn.Pressed += () => SelectSize(idx);
+            btn.Pressed += () => SelectSize(sizeIdx);
             sizesHBox.AddChild(btn);
             _sizeButtons[i] = btn;
         }
@@ -374,6 +376,76 @@ public partial class MainMenu : CanvasLayer
         var sep2 = new HSeparator();
         sep2.AddThemeConstantOverride("separation", 4);
         mainVBox.AddChild(sep2);
+
+        // Civilizations selection row
+        var civHBox = new HBoxContainer();
+        civHBox.AddThemeConstantOverride("separation", 12);
+        civHBox.Alignment = BoxContainer.AlignmentMode.Center;
+
+        var playerCivLabel = new Label();
+        playerCivLabel.Text = "You:";
+        playerCivLabel.AddThemeFontSizeOverride("font_size", 14);
+        playerCivLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.72f, 0.12f));
+        civHBox.AddChild(playerCivLabel);
+
+        _playerCivInput = new OptionButton();
+        _playerCivInput.CustomMinimumSize = new Vector2(160, 32);
+        _playerCivInput.AddThemeFontSizeOverride("font_size", 13);
+        civHBox.AddChild(_playerCivInput);
+
+        var aiCivLabel = new Label();
+        aiCivLabel.Text = "Rival:";
+        aiCivLabel.AddThemeFontSizeOverride("font_size", 14);
+        aiCivLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.08f, 0.08f));
+        civHBox.AddChild(aiCivLabel);
+
+        _aiCivInput = new OptionButton();
+        _aiCivInput.CustomMinimumSize = new Vector2(160, 32);
+        _aiCivInput.AddThemeFontSizeOverride("font_size", 13);
+        civHBox.AddChild(_aiCivInput);
+
+        // Populate dropdowns with registered civilizations
+        int defaultPlayerIdx = 0;
+        int defaultAiIdx = 0;
+        int idx = 0;
+        foreach (var civ in CivilizationRegistry.BaseGame)
+        {
+            _playerCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _playerCivInput.SetItemMetadata(idx, civ.Id);
+            _aiCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _aiCivInput.SetItemMetadata(idx, civ.Id);
+
+            if (civ.Id == "rome") defaultPlayerIdx = idx;
+            if (civ.Id == "babylon") defaultAiIdx = idx;
+            idx++;
+        }
+        foreach (var civ in CivilizationRegistry.PlayTheWorld)
+        {
+            _playerCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _playerCivInput.SetItemMetadata(idx, civ.Id);
+            _aiCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _aiCivInput.SetItemMetadata(idx, civ.Id);
+
+            if (civ.Id == "rome") defaultPlayerIdx = idx;
+            if (civ.Id == "babylon") defaultAiIdx = idx;
+            idx++;
+        }
+        foreach (var civ in CivilizationRegistry.Conquests)
+        {
+            _playerCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _playerCivInput.SetItemMetadata(idx, civ.Id);
+            _aiCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
+            _aiCivInput.SetItemMetadata(idx, civ.Id);
+
+            if (civ.Id == "rome") defaultPlayerIdx = idx;
+            if (civ.Id == "babylon") defaultAiIdx = idx;
+            idx++;
+        }
+
+        _playerCivInput.Selected = defaultPlayerIdx;
+        _aiCivInput.Selected = defaultAiIdx;
+
+        mainVBox.AddChild(civHBox);
 
         // Seed row
         var seedHBox = new HBoxContainer();
@@ -505,7 +577,20 @@ public partial class MainMenu : CanvasLayer
     {
         var opt = MapSizes[_selectedIndex];
         int seed = (int)(_seedInput?.Value ?? _seed);
-        OnStartGame?.Invoke(opt.Width, opt.Height, seed);
+        
+        string playerCivId = "rome";
+        string aiCivId = "babylon";
+
+        if (_playerCivInput != null && _playerCivInput.Selected >= 0)
+        {
+            playerCivId = (string)_playerCivInput.GetItemMetadata(_playerCivInput.Selected);
+        }
+        if (_aiCivInput != null && _aiCivInput.Selected >= 0)
+        {
+            aiCivId = (string)_aiCivInput.GetItemMetadata(_aiCivInput.Selected);
+        }
+
+        OnStartGame?.Invoke(opt.Width, opt.Height, seed, playerCivId, aiCivId);
     }
 
     private static StyleBoxFlat CreatePanelStyle(Color bg, Color border, float borderWidth = 2, float cornerRadius = 6)

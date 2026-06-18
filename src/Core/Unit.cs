@@ -18,8 +18,8 @@ public class Unit
     public UnitType Type { get; }
     public int X { get; set; }
     public int Y { get; set; }
-    public int MaxMovement { get; }
-    public int RemainingMovement { get; set; }
+    public float MaxMovement { get; }
+    public float RemainingMovement { get; set; }
     public int VisionRange { get; }
 
     // Combat Stats
@@ -53,43 +53,43 @@ public class Unit
         switch (type)
         {
             case UnitType.Explorer:
-                MaxMovement = 2;
+                MaxMovement = 2.0f;
                 VisionRange = 2;
                 AttackStrength = 1;
                 DefenseStrength = 1;
                 break;
             case UnitType.Settler:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 2;
                 AttackStrength = 0;
                 DefenseStrength = 1;
                 break;
             case UnitType.Warrior:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 1;
                 AttackStrength = 2;
                 DefenseStrength = 2;
                 break;
             case UnitType.Archer:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 2;
                 AttackStrength = 3;
                 DefenseStrength = 1;
                 break;
             case UnitType.Barbarian:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 1;
                 AttackStrength = 2;
                 DefenseStrength = 1;
                 break;
             case UnitType.Worker:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 1;
                 AttackStrength = 0;
                 DefenseStrength = 1;
                 break;
             default:
-                MaxMovement = 1;
+                MaxMovement = 1.0f;
                 VisionRange = 1;
                 AttackStrength = 1;
                 DefenseStrength = 1;
@@ -103,9 +103,9 @@ public class Unit
     public bool IsFortified { get; set; } = false;
     public bool IsSleeping { get; set; } = false;
 
-    public bool HasMovementRemaining() => RemainingMovement > 0 && !IsWorkerBuilding() && !IsSleeping;
+    public bool HasMovementRemaining() => RemainingMovement > 0.0f && !IsWorkerBuilding() && !IsSleeping;
 
-    public void MoveTo(int targetX, int targetY, int cost)
+    public void MoveTo(int targetX, int targetY, float cost)
     {
         if (IsWorkerBuilding()) return; // Cannot move while building!
 
@@ -118,18 +118,18 @@ public class Unit
         // Civ rules: moving consumes movement points. 
         // Entering a tile always consumes at least its movement cost,
         // but a unit can move onto a high-cost tile (like a mountain) even with 1 MP left, reducing it to 0.
-        RemainingMovement = Math.Max(0, RemainingMovement - cost);
+        RemainingMovement = Math.Max(0.0f, RemainingMovement - cost);
     }
 
     public void ResetMovement()
     {
         if (IsWorkerBuilding())
         {
-            RemainingMovement = 0; // Keep movement locked to 0 while building
+            RemainingMovement = 0.0f; // Keep movement locked to 0 while building
         }
         else if (IsSleeping)
         {
-            RemainingMovement = 0; // Sleeping units do not get movement refreshed
+            RemainingMovement = 0.0f; // Sleeping units do not get movement refreshed
         }
         else
         {

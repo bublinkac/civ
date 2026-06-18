@@ -19,6 +19,7 @@ public partial class GameHud : CanvasLayer
     private HBoxContainer? _actionsBox;
     private Label? _detailsLabel;
     private Button? _endTurnButton;
+    private TextureRect? _civIconRect;
 
     // Top buttons and modals
     private PanelContainer? _topBar;
@@ -62,6 +63,12 @@ public partial class GameHud : CanvasLayer
 
         var hbox = new HBoxContainer();
         hbox.AddThemeConstantOverride("separation", 10);
+
+        _civIconRect = new TextureRect();
+        _civIconRect.CustomMinimumSize = new Vector2(28, 28);
+        _civIconRect.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize;
+        _civIconRect.StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered;
+        hbox.AddChild(_civIconRect);
 
         var menuBtn = CreateStyledButton("Menu", new Color(0.18f, 0.18f, 0.22f));
         menuBtn.Pressed += () => ToggleModal(_gameMenuModal);
@@ -236,8 +243,10 @@ public partial class GameHud : CanvasLayer
         improvementsLabel.Text = "Workers can build tile improvements to permanently boost tile yields:\n" +
                                  "• FARM [F]: Adds +1 Food. Buildable on Grassland / Plains.\n" +
                                  "• MINE [M]: Adds +1 Production. Buildable on Desert / Mountains.\n" +
-                                 "• PLANTATION [L]: Adds +1 Commerce. Buildable on Grassland / Plains.\n\n" +
-                                 "Note: Improvements take multiple turns to build (Farm: 3, Mine: 4, Plantation: 3).";
+                                 "• PLANTATION [L]: Adds +1 Commerce. Buildable on Grassland / Plains.\n" +
+                                 "• ROAD [R]: Reduces movement cost to 1/3 MP, adds +1 Commerce.\n" +
+                                 "• RAILROAD [R]: Unlocks with Steam Power. Reduces movement to 0 MP (unlimited), adds +1 Food to Farms, +1 Production to Mines.\n\n" +
+                                 "Note: Improvements take multiple turns to build (Farm: 3, Mine: 4, Plantation: 3, Road: 2, Railroad: 3).";
         improvementsLabel.AddThemeFontSizeOverride("font_size", 14);
         improvementsLabel.Name = "Improvements";
         tabContainer.AddChild(improvementsLabel);
@@ -551,6 +560,17 @@ public partial class GameHud : CanvasLayer
     public void Refresh(GameSimulation sim, string? selectedUnitId, string? selectedCityId = null)
     {
         _sim = sim;
+
+        // Dynamically load selected player civilization icon
+        if (_civIconRect != null && _civIconRect.Texture == null)
+        {
+            string path = $"res://assets/leaders/{sim.PlayerCivId}.png";
+            if (ResourceLoader.Exists(path))
+            {
+                _civIconRect.Texture = GD.Load<Texture2D>(path);
+                _civIconRect.TooltipText = $"{sim.PlayerCiv.Name} ({sim.PlayerCiv.LeaderName})";
+            }
+        }
         
         // Refresh Minimap
         _minimap?.SetSimulation(sim);
@@ -625,7 +645,7 @@ public partial class GameHud : CanvasLayer
                 if (tile != null)
                 {
                     string impName = tile.Improvement != null ? $" ({tile.Improvement.Name})" : "";
-                    string roadName = tile.HasRoad ? " [ROAD]" : "";
+                    string roadName = tile.HasRailroad ? " [RAILROAD]" : (tile.HasRoad ? " [ROAD]" : "");
                     details += $"\nTerrain: {tile.Terrain.ToString().ToUpper()}{impName.ToUpper()}{roadName} | Yields: {tile.TotalYield}";
                 }
 
@@ -683,6 +703,11 @@ public partial class GameHud : CanvasLayer
                                         var roadBtn = CreateActionButton("🛣️", "Build Road", "R", () => OnActionTriggered?.Invoke("road"), new Color(0.25f, 0.25f, 0.3f));
                                         _actionsBox.AddChild(roadBtn);
                                     }
+                                    else if (!tile.HasRailroad && sim.Research.IsResearched("steam_power"))
+                                    {
+                                        var rrBtn = CreateActionButton("🚂", "Build Railroad", "R", () => OnActionTriggered?.Invoke("railroad"), new Color(0.35f, 0.15f, 0.15f));
+                                        _actionsBox.AddChild(rrBtn);
+                                    }
                                 }
                             }
 
@@ -737,7 +762,7 @@ public partial class GameHud : CanvasLayer
         int empUnitsCount = sim.Units.Count(u => u.Faction == Faction.Player);
         string diplStr = sim.IsAtWarWithAi ? "🔴 WAR WITH AI RIVAL" : "Peace with AI Rival";
 
-        _detailsLabel.Text = $"--- EMPIRE SUMMARY (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit}) ---\n" +
+        _detailsLabel.Text = $"--- EMPIRE SUMMARY: {sim.PlayerCiv.Name.ToUpper()} ({sim.PlayerCiv.LeaderName.ToUpper()}) (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit}) ---\n" +
                              $"Diplomacy: {diplStr}  |  Cities: {empCitiesCount} (Total Pop: {empPop})  |  Active Units: {empUnitsCount}\n" +
                              $"Research: {sim.Research.GetResearchStatusString()}\n" +
                              $"Tip: Press [SPACE] or click END TURN to finish your turn and restore movement points.";

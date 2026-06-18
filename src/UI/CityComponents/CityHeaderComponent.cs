@@ -37,7 +37,8 @@ public partial class CityHeaderComponent : PanelContainer
         mainHBox.AddChild(infoVBox);
 
         // City Name
-        var nameLabel = new Label { Text = city.Name.ToUpper() };
+        var nameText = city.IsCapital ? $"{city.Name.ToUpper()} (CAPITAL)" : city.Name.ToUpper();
+        var nameLabel = new Label { Text = nameText };
         nameLabel.AddThemeFontSizeOverride("font_size", 26);
         nameLabel.AddThemeColorOverride("font_color", new Color(0.12f, 0.1f, 0.05f));
         nameLabel.HorizontalAlignment = HorizontalAlignment.Center;

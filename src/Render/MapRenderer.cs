@@ -101,11 +101,11 @@ public partial class MapRenderer : TileMapLayer
 
         // Show Main Menu first
         _mainMenu = new MainMenu();
-        _mainMenu.OnStartGame += (width, height, seed) =>
+        _mainMenu.OnStartGame += (width, height, seed, playerCivId, aiCivId) =>
         {
             _mainMenu.QueueFree();
             _mainMenu = null;
-            StartGame(width, height, seed);
+            StartGame(width, height, seed, playerCivId, aiCivId);
         };
         _mainMenu.OnLoadGame += () =>
         {
@@ -143,7 +143,7 @@ public partial class MapRenderer : TileMapLayer
         SetupCamera();
     }
 
-    private void StartGame(int width, int height, int seed)
+    private void StartGame(int width, int height, int seed, string playerCivId = "rome", string aiCivId = "babylon")
     {
         MapWidth = width;
         MapHeight = height;
@@ -153,6 +153,8 @@ public partial class MapRenderer : TileMapLayer
         var generator = new MapGenerator(Seed);
         var map = generator.Generate(MapWidth, MapHeight);
         _sim = new GameSimulation(map);
+        _sim.PlayerCivId = playerCivId;
+        _sim.AiCivId = aiCivId;
         _sim.SetupInitialUnits();
 
         // 3. Programmatically configure TileSet for Isometric layout
@@ -227,7 +229,7 @@ public partial class MapRenderer : TileMapLayer
         };
 
         // Create and register textures based on TerrainRegistry
-        int id = 0;
+        int fallbackId = 0;
         foreach (var terrain in TerrainRegistry.All.Values)
         {
             Texture2D texture = GetOrCreateTerrainTexture(terrain);
@@ -239,8 +241,9 @@ public partial class MapRenderer : TileMapLayer
             };
             source.CreateTile(new Vector2I(0, 0));
 
-            tileSet.AddSource(source, id);
-            id++;
+            // Align the TileSet source ID with our stable _terrainToId mapping
+            int targetId = _terrainToId.ContainsKey(terrain.Id) ? _terrainToId[terrain.Id] : fallbackId++;
+            tileSet.AddSource(source, targetId);
         }
 
         this.TileSet = tileSet;
@@ -248,6 +251,57 @@ public partial class MapRenderer : TileMapLayer
 
     private Texture2D GetOrCreateTerrainTexture(Terrain terrain)
     {
+        string terrainId = terrain.Id.ToLower().Trim();
+        string downloadedPath = $"res://assets/terrains/{terrainId}.png";
+
+        if (FileAccess.FileExists(downloadedPath))
+        {
+            Image? srcImg = null;
+
+            try
+            {
+                string globalPath = ProjectSettings.GlobalizePath(downloadedPath);
+                if (System.IO.File.Exists(globalPath))
+                {
+                    srcImg = Image.LoadFromFile(globalPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.Print($"[MapRenderer] Failed to load {downloadedPath} via Image.LoadFromFile: {ex.Message}");
+            }
+
+            if (srcImg == null)
+            {
+                try
+                {
+                    var tex = GD.Load<Texture2D>(downloadedPath);
+                    if (tex != null)
+                    {
+                        srcImg = tex.GetImage();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GD.Print($"[MapRenderer] Failed to load {downloadedPath} via GD.Load: {ex.Message}");
+                }
+            }
+
+            if (srcImg != null)
+            {
+                try
+                {
+                    Image isoImg = ConvertToIsometricDiamond(srcImg);
+                    GD.Print($"[MapRenderer] Successfully converted {terrainId} to 256x128 isometric diamond.");
+                    return ImageTexture.CreateFromImage(isoImg);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[MapRenderer] Failed to convert {terrainId} to isometric: {ex.Message}");
+                }
+            }
+        }
+
         string dirPath = "res://assets";
         string fileName = terrain.Id.ToString().ToLower() + ".png";
         string filePath = $"{dirPath}/{fileName}";
@@ -269,6 +323,38 @@ public partial class MapRenderer : TileMapLayer
         }
 
         return ImageTexture.CreateFromImage(img);
+    }
+
+    private Image ConvertToIsometricDiamond(Image sourceImg)
+    {
+        int width = 256;
+        int height = 128;
+        Image destImg = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
+        destImg.Fill(new Color(0, 0, 0, 0)); // transparent background
+
+        int srcWidth = sourceImg.GetWidth();
+        int srcHeight = sourceImg.GetHeight();
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                double dx = Math.Abs(x - 128.0) / 128.0;
+                double dy = Math.Abs(y - 64.0) / 64.0;
+                double dist = dx + dy;
+
+                if (dist <= 1.0)
+                {
+                    int srcX = (int)Math.Clamp((x / 256.0) * srcWidth, 0, srcWidth - 1);
+                    int srcY = (int)Math.Clamp((y / 128.0) * srcHeight, 0, srcHeight - 1);
+
+                    Color pixelColor = sourceImg.GetPixel(srcX, srcY);
+                    destImg.SetPixel(x, y, pixelColor);
+                }
+            }
+        }
+
+        return destImg;
     }
 
     private Image GenerateTerrainImage(Terrain terrain)
@@ -705,13 +791,18 @@ public partial class MapRenderer : TileMapLayer
                     }
                 }
             }
-            else if ((keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L) && !string.IsNullOrEmpty(_selectedUnitId))
+            else if ((keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R) && !string.IsNullOrEmpty(_selectedUnitId))
             {
                 Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
                 if (selectedUnit != null && selectedUnit.Type == UnitType.Worker)
                 {
                     if (selectedUnit.Faction != Faction.Player)
                     {
+                        if (keyEvent.Keycode == Key.R)
+                        {
+                            // Avoid collision with any other hotkeys if selected unit is not owned by player
+                            return;
+                        }
                         GD.Print("[Control] Cannot command other factions' workers!");
                         return;
                     }
@@ -728,23 +819,48 @@ public partial class MapRenderer : TileMapLayer
                         return;
                     }
 
-                    TileImprovement? imp = keyEvent.Keycode switch
+                    TileImprovement? imp = null;
+                    if (keyEvent.Keycode == Key.F) imp = new Farm();
+                    else if (keyEvent.Keycode == Key.M) imp = new Mine();
+                    else if (keyEvent.Keycode == Key.L) imp = new Plantation();
+                    else if (keyEvent.Keycode == Key.R)
                     {
-                        Key.F => new Farm(),
-                        Key.M => new Mine(),
-                        Key.L => new Plantation(),
-                        _ => null
-                    };
+                        var tile = _sim.Map.GetTile(selectedUnit.X, selectedUnit.Y);
+                        if (tile != null)
+                        {
+                            if (!tile.HasRoad)
+                            {
+                                imp = new RoadBuild();
+                            }
+                            else if (!tile.HasRailroad && _sim.Research.IsResearched("steam_power"))
+                            {
+                                imp = new RailroadBuild();
+                            }
+                        }
+                    }
 
                     if (imp != null)
                     {
                         var tile = _sim.Map.GetTile(selectedUnit.X, selectedUnit.Y);
                         if (tile != null)
                         {
-                            if (tile.Improvement != null)
+                            if (imp is RoadBuild)
                             {
-                                GD.Print($"[Worker] There is already a {tile.Improvement.Name} built on this tile!");
-                                return;
+                                if (tile.HasRoad) return;
+                            }
+                            else if (imp is RailroadBuild)
+                            {
+                                if (!tile.HasRoad) return;
+                                if (tile.HasRailroad) return;
+                                if (!_sim.Research.IsResearched("steam_power")) return;
+                            }
+                            else
+                            {
+                                if (tile.Improvement != null)
+                                {
+                                    GD.Print($"[Worker] There is already a {tile.Improvement.Name} built on this tile!");
+                                    return;
+                                }
                             }
 
                             if (!imp.CanBeBuiltOn(tile.Terrain))
@@ -869,6 +985,7 @@ public partial class MapRenderer : TileMapLayer
             case "mine":
             case "plantation":
             case "road":
+            case "railroad":
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
@@ -881,14 +998,41 @@ public partial class MapRenderer : TileMapLayer
                             "mine" => new Mine(),
                             "plantation" => new Plantation(),
                             "road" => new RoadBuild(),
+                            "railroad" => new RailroadBuild(),
                             _ => null
                         };
                         if (imp != null)
                         {
                             var tile = _sim.Map.GetTile(selectedUnit.X, selectedUnit.Y);
-                            if (tile != null && tile.Improvement == null && imp.CanBeBuiltOn(tile.Terrain))
+                            if (tile != null && imp.CanBeBuiltOn(tile.Terrain))
                             {
-                                if (imp is RoadBuild && tile.HasRoad) return; // Already has road
+                                if (imp is RoadBuild)
+                                {
+                                    if (tile.HasRoad) return; // Already has road
+                                }
+                                else if (imp is RailroadBuild)
+                                {
+                                    if (!tile.HasRoad)
+                                    {
+                                        GD.Print("[Worker] Cannot build Railroad: tile must have a Road first!");
+                                        return;
+                                    }
+                                    if (tile.HasRailroad) return; // Already has railroad
+                                    if (!_sim.Research.IsResearched("steam_power"))
+                                    {
+                                        GD.Print("[Worker] Cannot build Railroad: Steam Power technology is required!");
+                                        return;
+                                    }
+                                }
+                                else
+                                {
+                                    if (tile.Improvement != null)
+                                    {
+                                        GD.Print($"[Worker] There is already a {tile.Improvement.Name} built on this tile!");
+                                        return;
+                                    }
+                                }
+
                                 selectedUnit.StartImprovement(imp);
                                 GD.Print($"[Worker] Started building {imp.Name} at ({selectedUnit.X}, {selectedUnit.Y})!");
                                 UpdateUiAfterAction();

@@ -2,11 +2,19 @@ namespace CivGame.Core;
 
 public enum TerrainType
 {
+    Coast,
+    Desert,
+    Floodplains,
+    Forest,
     Grassland,
-    Plains,
-    Ocean,
+    Hills,
+    Jungle,
+    Marsh,
     Mountain,
-    Desert
+    Ocean,
+    Plains,
+    Sea,
+    Tundra
 }
 
 public readonly struct TileYield
@@ -32,20 +40,25 @@ public class TileData
     public Terrain Terrain { get; set; }
     public Resource? Resource { get; set; }
 
-    private int _movementCost;
-    public int MovementCost
+    private float _movementCost;
+    public float MovementCost
     {
         get
         {
-            if (HasRoad && Terrain.Id != "ocean")
+            if (HasRailroad && Terrain.Id != "ocean" && Terrain.Id != "sea" && Terrain.Id != "coast")
             {
-                return 1; // Roads make movement through Desert and Mountain cost only 1 MP
+                return 0.0f; // Railroads cost 0 MP (unlimited movement)
+            }
+            if (HasRoad && Terrain.Id != "ocean" && Terrain.Id != "sea" && Terrain.Id != "coast")
+            {
+                return 1.0f / 3.0f; // Roads reduce movement cost to 1/3 MP
             }
             return _movementCost;
         }
         set => _movementCost = value;
     }
     public bool HasRoad { get; set; } = false;
+    public bool HasRailroad { get; set; } = false;
     public string? OwnerCityId { get; set; }
     public TileImprovement? Improvement { get; set; }
 
@@ -65,6 +78,25 @@ public class TileData
                 food += Improvement.BonusYield.Food;
                 production += Improvement.BonusYield.Production;
                 commerce += Improvement.BonusYield.Commerce;
+
+                // Civ3 Railroad bonus: +1 Food for irrigated tiles (Farm), +1 Production for Mined tiles
+                if (HasRailroad)
+                {
+                    if (Improvement is Farm)
+                    {
+                        food += 1;
+                    }
+                    else if (Improvement is Mine)
+                    {
+                        production += 1;
+                    }
+                }
+            }
+
+            // Civ3 Road bonus: +1 Commerce on worked tiles (except water)
+            if (HasRoad && Terrain.Id != "ocean" && Terrain.Id != "sea" && Terrain.Id != "coast")
+            {
+                commerce += 1;
             }
 
             if (Resource != null)

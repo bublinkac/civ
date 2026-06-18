@@ -22,6 +22,7 @@ public class TileSaveDto
     public string? OwnerCityId { get; set; }
     public string? ImprovementName { get; set; }
     public bool HasRoad { get; set; }
+    public bool HasRailroad { get; set; }
 }
 
 public class UnitSaveDto
@@ -30,7 +31,7 @@ public class UnitSaveDto
     public UnitType Type { get; set; }
     public int X { get; set; }
     public int Y { get; set; }
-    public int RemainingMovement { get; set; }
+    public float RemainingMovement { get; set; }
     public int Health { get; set; }
     public Faction Faction { get; set; }
     public string? CivilizationId { get; set; }
@@ -59,6 +60,7 @@ public class CitySaveDto
     public List<string> WorkedTiles { get; set; } = new(); // format: "x,y"
     public Faction Faction { get; set; }
     public string? CivilizationId { get; set; }
+    public bool IsCapital { get; set; }
 }
 
 public class SaveDataDto

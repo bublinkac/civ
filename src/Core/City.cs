@@ -112,6 +112,11 @@ public class City
     public Faction Faction { get; set; }
     public string? CivilizationId { get; set; }
     public Civilization? Civilization => CivilizationId != null ? CivilizationRegistry.Get(CivilizationId) : null;
+    
+    // Capital & Corruption properties
+    public bool IsCapital { get; set; } = false;
+    public int LastTurnWaste { get; set; } = 0;
+    public int LastTurnCorruption { get; set; } = 0;
 
     // Resource storage (accumulated yields)
     public int StoredFood { get; set; }

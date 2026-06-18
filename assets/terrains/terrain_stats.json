@@ -1,0 +1,122 @@
+[
+  {
+    "id": "coast",
+    "name": "Coast",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 1,
+    "shields": 0,
+    "commerce": 2,
+    "image_path": "assets/terrains/coast.png"
+  },
+  {
+    "id": "desert",
+    "name": "Desert",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 0,
+    "shields": 1,
+    "commerce": 0,
+    "image_path": "assets/terrains/desert.png"
+  },
+  {
+    "id": "floodplains",
+    "name": "Flood Plain",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 3,
+    "shields": 0,
+    "commerce": 0,
+    "image_path": "assets/terrains/floodplains.png"
+  },
+  {
+    "id": "forest",
+    "name": "Forest",
+    "movement_cost": 2,
+    "defense_bonus_percent": 25,
+    "food": 1,
+    "shields": 2,
+    "commerce": 0,
+    "image_path": "assets/terrains/forest.png"
+  },
+  {
+    "id": "grassland",
+    "name": "Grassland",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 2,
+    "shields": 0,
+    "commerce": 0,
+    "image_path": "assets/terrains/grassland.png"
+  },
+  {
+    "id": "hills",
+    "name": "Hills",
+    "movement_cost": 2,
+    "defense_bonus_percent": 50,
+    "food": 1,
+    "shields": 1,
+    "commerce": 0,
+    "image_path": "assets/terrains/hills.png"
+  },
+  {
+    "id": "jungle",
+    "name": "Jungle",
+    "movement_cost": 3,
+    "defense_bonus_percent": 25,
+    "food": 1,
+    "shields": 0,
+    "commerce": 0,
+    "image_path": "assets/terrains/jungle.png"
+  },
+  {
+    "id": "mountain",
+    "name": "Mountains",
+    "movement_cost": 3,
+    "defense_bonus_percent": 100,
+    "food": 0,
+    "shields": 1,
+    "commerce": 0,
+    "image_path": "assets/terrains/mountain.png"
+  },
+  {
+    "id": "ocean",
+    "name": "Ocean",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 0,
+    "shields": 0,
+    "commerce": 0,
+    "image_path": "assets/terrains/ocean.png"
+  },
+  {
+    "id": "plains",
+    "name": "Plains",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 1,
+    "shields": 1,
+    "commerce": 0,
+    "image_path": "assets/terrains/plains.png"
+  },
+  {
+    "id": "sea",
+    "name": "Sea",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 1,
+    "shields": 0,
+    "commerce": 1,
+    "image_path": "assets/terrains/sea.png"
+  },
+  {
+    "id": "tundra",
+    "name": "Tundra",
+    "movement_cost": 1,
+    "defense_bonus_percent": 10,
+    "food": 1,
+    "shields": 0,
+    "commerce": 0,
+    "image_path": "assets/terrains/tundra.png"
+  }
+]

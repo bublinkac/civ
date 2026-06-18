@@ -184,6 +184,15 @@ public class GameSimulation
         int aiStartX = Map.Width - px;
         int aiStartY = Map.Height - py;
 
+        // If the calculated position is too close to the player (e.g. because px/py is in the exact center), offset it!
+        int distance = Math.Abs(aiStartX - px) + Math.Abs(aiStartY - py);
+        if (distance < Map.Width / 3)
+        {
+            // Shift AI starting search position to another quadrant
+            aiStartX = (px + Map.Width / 3) % Map.Width;
+            aiStartY = (py + Map.Height / 3) % Map.Height;
+        }
+
         // Ensure within reasonable bounds
         aiStartX = Math.Clamp(aiStartX, 2, Map.Width - 3);
         aiStartY = Math.Clamp(aiStartY, 2, Map.Height - 3);
@@ -265,6 +274,12 @@ public class GameSimulation
         foreach (var unit in Units)
         {
             int r = unit.VisionRange;
+            var tile = Map.GetTile(unit.X, unit.Y);
+            if (tile != null && tile.Improvement != null && tile.Improvement.Id == "outpost")
+            {
+                r += 2;
+            }
+
             for (int dx = -r; dx <= r; dx++)
             {
                 for (int dy = -r; dy <= r; dy++)
@@ -329,6 +344,16 @@ public class GameSimulation
         }
 
         var city = new City($"city_{Guid.NewGuid().ToString().Substring(0, 8)}", name, unit.X, unit.Y, TurnNumber, unit.Faction, unit.CivilizationId);
+        
+        // If this is the first city for this faction, it becomes the Capital with a Palace
+        bool isFirstCity = !Cities.Any(c => c.Faction == unit.Faction);
+        if (isFirstCity)
+        {
+            city.IsCapital = true;
+            city.Buildings.Add(new Palace());
+            Console.WriteLine($"[Capital] {city.Name} has been established as the capital!");
+        }
+
         Cities.Add(city);
         Units.Remove(unit); // Consume settler
 
@@ -524,7 +549,8 @@ public class GameSimulation
         CheckTerritoryIntrusion(unit, targetX, targetY);
 
         // Normal movement
-        unit.MoveTo(targetX, targetY, tile.MovementCost);
+        float moveCost = GetTileMovementCostForUnit(tile, unit);
+        unit.MoveTo(targetX, targetY, moveCost);
         
         // Check for city capture on normal move into undefended city
         CheckCityCapture(unit, targetX, targetY);
@@ -548,6 +574,20 @@ public class GameSimulation
         }
 
         return false;
+    }
+
+    public float GetTileMovementCostForUnit(TileData tile, Unit unit)
+    {
+        float cost = tile.MovementCost;
+        if (tile.Improvement != null && tile.Improvement.Id == "barricade" && tile.OwnerCityId != null)
+        {
+            var city = Cities.Find(c => c.Id == tile.OwnerCityId);
+            if (city != null && city.Faction != unit.Faction)
+            {
+                cost += 1.0f; // Barricades slow down enemies
+            }
+        }
+        return cost;
     }
 
     private void CheckTerritoryIntrusion(Unit unit, int targetX, int targetY)
@@ -593,6 +633,29 @@ public class GameSimulation
             defStrength *= 1.25f; // +25% defense bonus when fortified
         }
 
+        // Apply terrain defense bonus
+        var defTile = Map.GetTile(defender.X, defender.Y);
+        if (defTile != null)
+        {
+            float terrainBonus = defTile.Terrain.DefenseBonusPercent / 100.0f;
+            defStrength *= (1.0f + terrainBonus);
+            Console.WriteLine($"[Combat] {defender.Type} receives +{defTile.Terrain.DefenseBonusPercent}% defense bonus from terrain ({defTile.Terrain.Name})!");
+
+            if (defTile.Improvement != null)
+            {
+                if (defTile.Improvement.Id == "fortress")
+                {
+                    defStrength *= 1.50f; // +50% defense from Fortress
+                    Console.WriteLine($"[Combat] {defender.Type} receives +50% defense bonus from Fortress!");
+                }
+                else if (defTile.Improvement.Id == "barricade")
+                {
+                    defStrength *= 2.00f; // +100% defense from Barricade
+                    Console.WriteLine($"[Combat] {defender.Type} receives +100% defense bonus from Barricade!");
+                }
+            }
+        }
+
         // The Pentagon effect: Defender gets +25% defense strength globally if their faction completed it
         bool defenderHasPentagon = Cities.Any(c => c.Faction == defender.Faction && c.Buildings.Any(b => b.Id == "pentagon"));
         if (defenderHasPentagon)
@@ -627,7 +690,8 @@ public class GameSimulation
             if (!attackerDied)
             {
                 var tile = Map.GetTile(defender.X, defender.Y)!;
-                attacker.MoveTo(defender.X, defender.Y, tile.MovementCost);
+                float moveCost = GetTileMovementCostForUnit(tile, attacker);
+                attacker.MoveTo(defender.X, defender.Y, moveCost);
                 Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
                 
                 FactionsWithVictoriousUnit.Add(attacker.Faction);
@@ -653,6 +717,46 @@ public class GameSimulation
         }
     }
 
+    private void RelocateCapital(Faction faction)
+    {
+        var remainingCities = Cities.Where(c => c.Faction == faction).OrderBy(c => c.FoundedYear).ToList();
+        if (remainingCities.Count == 0) return;
+
+        var newCapital = remainingCities[0];
+        newCapital.IsCapital = true;
+        if (!newCapital.Buildings.Any(b => b is Palace))
+        {
+            newCapital.Buildings.Add(new Palace());
+        }
+        Console.WriteLine($"[Capital] {newCapital.Name} has become the new capital of {faction}!");
+    }
+
+    private int GetDistanceToNearestCapital(City city)
+    {
+        if (city.IsCapital) return 0;
+
+        int minDist = int.MaxValue;
+
+        // Distance to main capital
+        var capital = Cities.FirstOrDefault(c => c.Faction == city.Faction && c.IsCapital);
+        if (capital != null)
+        {
+            int dx = Math.Abs(city.X - capital.X);
+            int dy = Math.Abs(city.Y - capital.Y);
+            minDist = Math.Min(minDist, Math.Max(dx, dy)); // Chebyshev
+        }
+
+        // Distance to Forbidden Palace cities (secondary capitals for corruption)
+        foreach (var fpCity in Cities.Where(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "forbidden_palace")))
+        {
+            int dx = Math.Abs(city.X - fpCity.X);
+            int dy = Math.Abs(city.Y - fpCity.Y);
+            minDist = Math.Min(minDist, Math.Max(dx, dy));
+        }
+
+        return minDist == int.MaxValue ? 0 : minDist;
+    }
+
     private void CheckCityCapture(Unit unit, int x, int y)
     {
         // Only military units can capture cities
@@ -664,6 +768,9 @@ public class GameSimulation
         // Check if it's an enemy city
         if (city.Faction != unit.Faction)
         {
+            var oldFaction = city.Faction;
+            bool wasCapital = city.IsCapital;
+
             if (unit.Faction == Faction.Barbarian)
             {
                 Console.WriteLine($"[City Captured] Barbarians have razed the city of {city.Name} at ({x}, {y})!");
@@ -681,11 +788,18 @@ public class GameSimulation
                     }
                 }
                 Cities.Remove(city);
+
+                if (wasCapital)
+                {
+                    RelocateCapital(oldFaction);
+                }
             }
             else
             {
-                var oldFaction = city.Faction;
                 city.Faction = unit.Faction;
+                city.IsCapital = false; // Captured city is no longer the old faction's capital
+                // Remove Palace from captured city (old faction gets a new one)
+                city.Buildings.RemoveAll(b => b is Palace);
 
                 // Clear city production progress upon capture
                 city.CurrentProject = ProductionProject.None;
@@ -696,6 +810,11 @@ public class GameSimulation
                 city.Population = Math.Max(1, city.Population - 1);
 
                 Console.WriteLine($"[City Captured] Faction {unit.Faction} has captured the city of {city.Name} from {oldFaction} at ({x}, {y})!");
+
+                if (wasCapital)
+                {
+                    RelocateCapital(oldFaction);
+                }
             }
         }
     }
@@ -835,6 +954,7 @@ public class GameSimulation
                 tile.OwnerCityId = dto.OwnerCityId;
                 tile.MovementCost = tile.Terrain.MovementCost;
                 tile.HasRoad = dto.HasRoad;
+                tile.HasRailroad = dto.HasRailroad;
                 
                 // Reconstruct Improvement
                 if (string.IsNullOrEmpty(dto.ImprovementName))
@@ -848,6 +968,9 @@ public class GameSimulation
                         "Farm" => new Farm(),
                         "Mine" => new Mine(),
                         "Plantation" => new Plantation(),
+                        "Fortress" => new Fortress(),
+                        "Barricade" => new Barricade(),
+                        "Outpost" => new Outpost(),
                         _ => null
                     };
                 }
@@ -869,6 +992,11 @@ public class GameSimulation
                     "Farm" => new Farm(),
                     "Mine" => new Mine(),
                     "Plantation" => new Plantation(),
+                    "Road" => new RoadBuild(),
+                    "Railroad" => new RailroadBuild(),
+                    "Fortress" => new Fortress(),
+                    "Barricade" => new Barricade(),
+                    "Outpost" => new Outpost(),
                     _ => null
                 };
                 unit.ConstructionTurnsRemaining = dto.ConstructionTurnsRemaining;
@@ -886,6 +1014,7 @@ public class GameSimulation
             city.StoredCommerce = dto.StoredCommerce;
             city.Population = dto.Population;
             city.LastTurnNetFood = dto.LastTurnNetFood;
+            city.IsCapital = dto.IsCapital;
             city.CurrentProject = dto.CurrentProject;
             city.CurrentProductionProgress = dto.CurrentProductionProgress;
             if (dto.ProductionQueue != null)
@@ -991,11 +1120,11 @@ public class GameSimulation
     public HashSet<(int X, int Y)> GetReachableTiles(Unit unit)
     {
         var reachable = new HashSet<(int, int)>();
-        if (unit.RemainingMovement <= 0) return reachable;
+        if (unit.RemainingMovement <= 0.0f) return reachable;
 
         // BFS: each state tracks (x, y, mpRemaining after entering that tile)
-        var queue = new Queue<(int X, int Y, int Mp)>();
-        var bestMp = new Dictionary<(int, int), int>();
+        var queue = new Queue<(int X, int Y, float Mp)>();
+        var bestMp = new Dictionary<(int, int), float>();
 
         queue.Enqueue((unit.X, unit.Y, unit.RemainingMovement));
         bestMp[(unit.X, unit.Y)] = unit.RemainingMovement;
@@ -1006,7 +1135,7 @@ public class GameSimulation
         while (queue.Count > 0)
         {
             var (cx, cy, mp) = queue.Dequeue();
-            if (mp <= 0) continue;
+            if (mp <= 0.0f) continue;
 
             for (int i = 0; i < 8; i++)
             {
@@ -1017,10 +1146,11 @@ public class GameSimulation
                 var tile = Map.GetTile(nx, ny);
                 if (tile == null || tile.Terrain.Id == "ocean") continue;
 
-                int remaining = Math.Max(0, mp - tile.MovementCost);
+                float moveCost = GetTileMovementCostForUnit(tile, unit);
+                float remaining = Math.Max(0.0f, mp - moveCost);
                 reachable.Add((nx, ny));
 
-                if (!bestMp.TryGetValue((nx, ny), out int prev) || remaining > prev)
+                if (!bestMp.TryGetValue((nx, ny), out float prev) || remaining > prev)
                 {
                     bestMp[(nx, ny)] = remaining;
                     queue.Enqueue((nx, ny, remaining));
@@ -1096,6 +1226,11 @@ public class GameSimulation
                         {
                             tile.HasRoad = true;
                             Console.WriteLine($"[Construction Completed] Road built at ({unit.X}, {unit.Y})!");
+                        }
+                        else if (improvement is RailroadBuild)
+                        {
+                            tile.HasRailroad = true;
+                            Console.WriteLine($"[Construction Completed] Railroad built at ({unit.X}, {unit.Y})!");
                         }
                         else
                         {
@@ -1476,6 +1611,21 @@ public class GameSimulation
                 production *= 2;
             }
 
+            // Apply Corruption & Waste (based on distance to capital)
+            int dist = GetDistanceToNearestCapital(city);
+            float corruptionRate = city.IsCapital ? 0f : Math.Min(dist * 0.10f, 0.70f);
+            float wasteRate = city.IsCapital ? 0f : Math.Min(dist * 0.08f, 0.50f);
+
+            if (city.Buildings.Any(b => b.Id == "courthouse")) corruptionRate *= 0.5f;
+            if (city.Buildings.Any(b => b.Id == "police_station")) corruptionRate *= 0.5f;
+
+            int corruption = (int)Math.Round(commerce * corruptionRate);
+            int waste = (int)Math.Round(production * wasteRate);
+            city.LastTurnCorruption = corruption;
+            city.LastTurnWaste = waste;
+            commerce -= corruption;
+            production -= waste;
+
             // 5. Food Consumption & Growth/Starvation
             int foodConsumption = city.Population * 2;
             int netFood = food - foodConsumption;
@@ -1718,6 +1868,19 @@ public class GameSimulation
             }
             else if (building != null)
             {
+                // If building a Palace, move capital from old to new city
+                if (building is Palace && !city.IsCapital)
+                {
+                    var oldCapital = Cities.FirstOrDefault(c => c.Faction == city.Faction && c.IsCapital);
+                    if (oldCapital != null)
+                    {
+                        oldCapital.IsCapital = false;
+                        oldCapital.Buildings.RemoveAll(b => b is Palace);
+                        Console.WriteLine($"[Capital] Palace moved from {oldCapital.Name} to {city.Name}!");
+                    }
+                    city.IsCapital = true;
+                }
+
                 city.Buildings.Add(building);
                 System.Console.WriteLine($"[Production] {city.Name} has completed building a {building.Name}!");
                 building.OnCompleted(city, this);

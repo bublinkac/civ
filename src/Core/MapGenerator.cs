@@ -25,12 +25,13 @@ public class MapGenerator
                 // Scale coordinates for noise computation
                 double nx = (double)x / width;
                 double ny = (double)y / height;
+                double latitude = Math.Abs(((double)y / Math.Max(1, height - 1)) - 0.5) * 2.0;
 
                 // Multi-octave Perlin noise for elevation and moisture
                 double elevation = NoiseOctave(nx * 3.5, ny * 3.5, 4, 0.5);
                 double moisture = NoiseOctave(nx * 4.5 + 15.0, ny * 4.5 + 15.0, 3, 0.5);
 
-                TerrainType terrainType = DetermineTerrain(elevation, moisture);
+                TerrainType terrainType = DetermineTerrain(elevation, moisture, latitude);
                 Resource? resource = DetermineResource(terrainType, x, y);
                 Terrain terrain = TerrainRegistry.Get(terrainType.ToString().ToLower())!;
 
@@ -41,42 +42,82 @@ public class MapGenerator
         return map;
     }
 
-    private static TerrainType DetermineTerrain(double elevation, double moisture)
+    private static TerrainType DetermineTerrain(double elevation, double moisture, double latitude)
     {
-        // 1. Water check
-        if (elevation < 0.42)
+        // 1. Water bands
+        if (elevation < 0.28)
         {
             return TerrainType.Ocean;
         }
+        if (elevation < 0.36)
+        {
+            return TerrainType.Sea;
+        }
+        if (elevation < 0.44)
+        {
+            return TerrainType.Coast;
+        }
 
-        // 2. High altitude check
-        if (elevation > 0.76)
+        // 2. Polar bands
+        if (latitude > 0.72)
+        {
+            return TerrainType.Tundra;
+        }
+
+        // 3. High altitude check
+        if (elevation > 0.86)
         {
             return TerrainType.Mountain;
         }
+        if (elevation > 0.77)
+        {
+            return TerrainType.Hills;
+        }
 
-        // 3. Moisture-based flatland allocation
-        if (moisture < 0.28)
+        // 4. Moisture-based flatland/vegetation allocation
+        if (moisture < 0.16)
         {
             return TerrainType.Desert;
         }
-        else if (moisture > 0.62)
+        if (moisture < 0.26)
+        {
+            return TerrainType.Floodplains;
+        }
+        if (moisture > 0.80)
+        {
+            return TerrainType.Marsh;
+        }
+        if (moisture > 0.68)
+        {
+            return latitude < 0.45 ? TerrainType.Jungle : TerrainType.Forest;
+        }
+        if (moisture > 0.54)
+        {
+            return TerrainType.Forest;
+        }
+        if (moisture > 0.36)
         {
             return TerrainType.Grassland;
         }
-        else
-        {
-            return TerrainType.Plains;
-        }
+
+        return TerrainType.Plains;
     }
 
     private static readonly Dictionary<TerrainType, string> _terrainTypeToId = new()
     {
-        {TerrainType.Grassland, "grassland"},
-        {TerrainType.Plains, "plains"},
+        {TerrainType.Coast, "coast"},
         {TerrainType.Desert, "desert"},
+        {TerrainType.Floodplains, "floodplains"},
+        {TerrainType.Forest, "forest"},
+        {TerrainType.Grassland, "grassland"},
+        {TerrainType.Hills, "hills"},
+        {TerrainType.Jungle, "jungle"},
+        {TerrainType.Marsh, "marsh"},
         {TerrainType.Mountain, "mountain"},
-        {TerrainType.Ocean, "ocean"}
+        {TerrainType.Ocean, "ocean"},
+        {TerrainType.Plains, "plains"},
+        {TerrainType.Sea, "sea"},
+        {TerrainType.Tundra, "tundra"}
     };
 
     private Resource? DetermineResource(TerrainType terrainType, int x, int y)

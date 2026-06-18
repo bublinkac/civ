@@ -65,7 +65,8 @@ public class JsonSaveSystem : ISaveSystem
                         TerrainId = tile.Terrain.Id,
                         OwnerCityId = tile.OwnerCityId,
                         ImprovementName = tile.Improvement?.Name,
-                        HasRoad = tile.HasRoad
+                        HasRoad = tile.HasRoad,
+                        HasRailroad = tile.HasRailroad
                     });
                 }
             }
@@ -111,7 +112,8 @@ public class JsonSaveSystem : ISaveSystem
                 ProductionQueue = city.ProductionQueue.ToList(),
                 WorkedTiles = city.WorkedTiles.Select(t => $"{t.X},{t.Y}").ToList(),
                 Faction = city.Faction,
-                CivilizationId = city.CivilizationId
+                CivilizationId = city.CivilizationId,
+                IsCapital = city.IsCapital
             };
 
             foreach (var building in city.Buildings)

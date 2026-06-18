@@ -307,8 +307,9 @@ public partial class DomesticAdvisorPanel : PanelContainer
                 prodText = $"{prodText}\n({turnsLeft} turns)";
             }
             
+            var cityLabel = city.IsCapital ? $"👑 {city.Name}" : city.Name;
             var row = CreateRow(
-                city.Name,
+                cityLabel,
                 food.ToString(),
                 prod.ToString(),
                 comm.ToString(),
