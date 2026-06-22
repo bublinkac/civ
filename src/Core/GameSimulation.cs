@@ -757,6 +757,28 @@ public class GameSimulation
         return minDist == int.MaxValue ? 0 : minDist;
     }
 
+    public bool HasFreshWaterAccess(City city)
+    {
+        // Check adjacent tiles (including city center tile itself)
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int tx = city.X + dx;
+                int ty = city.Y + dy;
+                if (Map.IsInBounds(tx, ty))
+                {
+                    var tile = Map.GetTile(tx, ty);
+                    if (tile != null && (tile.Terrain.Id == "coast" || tile.Terrain.Id == "floodplains"))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private void CheckCityCapture(Unit unit, int x, int y)
     {
         // Only military units can capture cities
@@ -955,6 +977,7 @@ public class GameSimulation
                 tile.MovementCost = tile.Terrain.MovementCost;
                 tile.HasRoad = dto.HasRoad;
                 tile.HasRailroad = dto.HasRailroad;
+                tile.IsPolluted = dto.IsPolluted;
                 
                 // Reconstruct Improvement
                 if (string.IsNullOrEmpty(dto.ImprovementName))
@@ -1015,6 +1038,7 @@ public class GameSimulation
             city.Population = dto.Population;
             city.LastTurnNetFood = dto.LastTurnNetFood;
             city.IsCapital = dto.IsCapital;
+            city.AccumulatedCulture = dto.AccumulatedCulture;
             city.CurrentProject = dto.CurrentProject;
             city.CurrentProductionProgress = dto.CurrentProductionProgress;
             if (dto.ProductionQueue != null)
@@ -1231,6 +1255,11 @@ public class GameSimulation
                         {
                             tile.HasRailroad = true;
                             Console.WriteLine($"[Construction Completed] Railroad built at ({unit.X}, {unit.Y})!");
+                        }
+                        else if (improvement is CleanPollution)
+                        {
+                            tile.IsPolluted = false;
+                            Console.WriteLine($"[Construction Completed] Pollution cleaned up at ({unit.X}, {unit.Y})!");
                         }
                         else
                         {
@@ -1501,6 +1530,20 @@ public class GameSimulation
 
         foreach (var city in Cities)
         {
+            // Update citizen happiness/mood and accumulate culture
+            city.UpdateCitizenMood(this);
+
+            int cultPerTurn = city.GetCulturePerTurn();
+            city.AccumulatedCulture += cultPerTurn;
+
+            // Expand cultural borders based on threshold
+            int currentRadius = 1;
+            if (city.AccumulatedCulture >= 10000) currentRadius = 5;
+            else if (city.AccumulatedCulture >= 1000) currentRadius = 4;
+            else if (city.AccumulatedCulture >= 100) currentRadius = 3;
+            else if (city.AccumulatedCulture >= 10) currentRadius = 2;
+            ClaimCityTerritory(city, currentRadius);
+
             int food = 0, production = 0, commerce = 0;
 
             // 1. Center tile (city center itself) is ALWAYS worked
@@ -1626,6 +1669,28 @@ public class GameSimulation
             commerce -= corruption;
             production -= waste;
 
+            // Civil Disorder halts all production and commerce
+            if (city.IsInDisorder)
+            {
+                production = 0;
+                commerce = 0;
+                Console.WriteLine($"[REVOLT] {city.Name} is in Civil Disorder! Production and Commerce are completely HALTED.");
+            }
+
+            // 4.5 Pollution Event Roll (1.5% probability per point of pollution per turn)
+            var pollutionStats = PollutionSystem.GetCityPollutionStats(city, production);
+            var rand = new Random();
+            if (rand.NextDouble() < pollutionStats.Probability && workingTiles.Count > 0)
+            {
+                int randIndex = rand.Next(workingTiles.Count);
+                var targetTile = workingTiles[randIndex];
+                if (!targetTile.IsPolluted)
+                {
+                    targetTile.IsPolluted = true;
+                    Console.WriteLine($"[POLLUTION] Active pollution has erupted at ({targetTile.X}, {targetTile.Y}) near {city.Name}! The tile yields nothing until cleaned.");
+                }
+            }
+
             // 5. Food Consumption & Growth/Starvation
             int foodConsumption = city.Population * 2;
             int netFood = food - foodConsumption;
@@ -1633,10 +1698,17 @@ public class GameSimulation
 
             city.StoredFood += netFood;
             
-            // Check population cap
-            int popCap = 9999;
-            if (city.HasBuilding<Hospital>()) popCap = 20;
-            else if (city.HasBuilding<Aqueduct>()) popCap = 12;
+            // Check population cap based on Civ3 rules (Fresh Water or Aqueduct allows Size 7-12, Hospital allows Size 13+)
+            int popCap = 6;
+            bool hasFreshWater = HasFreshWaterAccess(city);
+            if (city.HasBuilding<Hospital>())
+            {
+                popCap = 20; // Metropolis cap
+            }
+            else if (city.HasBuilding<Aqueduct>() || hasFreshWater)
+            {
+                popCap = 12;
+            }
 
             if (city.StoredFood >= city.FoodNeededForGrowth)
             {

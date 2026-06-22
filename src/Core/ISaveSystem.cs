@@ -23,6 +23,7 @@ public class TileSaveDto
     public string? ImprovementName { get; set; }
     public bool HasRoad { get; set; }
     public bool HasRailroad { get; set; }
+    public bool IsPolluted { get; set; }
 }
 
 public class UnitSaveDto
@@ -61,6 +62,7 @@ public class CitySaveDto
     public Faction Faction { get; set; }
     public string? CivilizationId { get; set; }
     public bool IsCapital { get; set; }
+    public int AccumulatedCulture { get; set; }
 }
 
 public class SaveDataDto

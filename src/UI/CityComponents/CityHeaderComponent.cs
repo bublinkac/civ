@@ -38,6 +38,10 @@ public partial class CityHeaderComponent : PanelContainer
 
         // City Name
         var nameText = city.IsCapital ? $"{city.Name.ToUpper()} (CAPITAL)" : city.Name.ToUpper();
+        if (city.IsInDisorder)
+        {
+            nameText = $"🔥 {nameText} [REVOLT!] 🔥";
+        }
         var nameLabel = new Label { Text = nameText };
         nameLabel.AddThemeFontSizeOverride("font_size", 26);
         nameLabel.AddThemeColorOverride("font_color", new Color(0.12f, 0.1f, 0.05f));
@@ -53,7 +57,7 @@ public partial class CityHeaderComponent : PanelContainer
         infoVBox.AddChild(grid);
 
         // Row 1: Founded, Gold, Gov
-        var foundedLabel = new Label { Text = $"Founded: {city.FoundedYear * 50} BC" };
+        var foundedLabel = new Label { Text = $"Founded: {TurnTimeline.GetFormattedYear(city.FoundedYear)}" };
         styleHeaderLabel(foundedLabel);
         grid.AddChild(foundedLabel);
 
@@ -77,7 +81,7 @@ public partial class CityHeaderComponent : PanelContainer
         styleHeaderLabel(popLabel);
         grid.AddChild(popLabel);
 
-        var yearLabel = new Label { Text = $"{sim.TurnNumber * 40} AD" }; // Turn base year
+        var yearLabel = new Label { Text = TurnTimeline.GetFormattedYear(sim.TurnNumber) };
         styleHeaderLabel(yearLabel);
         grid.AddChild(yearLabel);
 

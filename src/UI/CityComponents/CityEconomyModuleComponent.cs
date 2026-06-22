@@ -87,18 +87,28 @@ public partial class CityEconomyModuleComponent : PanelContainer
         pollTitle.AddThemeColorOverride("font_color", new Color(0.2f, 0.15f, 0.1f));
         pollVBox.AddChild(pollTitle);
 
-        bool hasIndustry = city.Buildings.Any(b => b.Id == "factory" || b.Id == "coal_plant");
+        // Gather base production
+        int baseProd = 0;
+        var centerTile = sim.Map.GetTile(city.X, city.Y);
+        if (centerTile != null) baseProd += centerTile.TotalYield.Production;
+        foreach (var tilePos in city.WorkedTiles)
+        {
+            var t = sim.Map.GetTile(tilePos.X, tilePos.Y);
+            if (t != null && t.OwnerCityId == city.Id) baseProd += t.TotalYield.Production;
+        }
+
+        var pollStats = PollutionSystem.GetCityPollutionStats(city, baseProd);
         var pollStatus = new HBoxContainer();
         pollStatus.AddThemeConstantOverride("separation", 6);
         pollVBox.AddChild(pollStatus);
 
-        if (hasIndustry)
+        if (pollStats.TotalPoints > 0)
         {
             var warnIcon = new Label { Text = "⚠️ ☣️" };
             warnIcon.AddThemeFontSizeOverride("font_size", 14);
             pollStatus.AddChild(warnIcon);
 
-            var warnText = new Label { Text = "Industrial Pollution Active!" };
+            var warnText = new Label { Text = $"{pollStats.TotalPoints} pts ({pollStats.Probability:P0}/turn chance)" };
             warnText.AddThemeFontSizeOverride("font_size", 10);
             warnText.AddThemeColorOverride("font_color", new Color(0.65f, 0.15f, 0.15f));
             pollStatus.AddChild(warnText);

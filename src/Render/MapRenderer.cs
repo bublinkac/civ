@@ -26,6 +26,7 @@ public partial class MapRenderer : TileMapLayer
     private HighlightRenderer? _highlightRenderer;
     private CityRenderer? _cityRenderer;
     private BorderRenderer? _borderRenderer;
+    private PollutionRenderer? _pollutionRenderer;
     private CityDetailPanel? _cityDetail; 
     private AdvisorsMenu? _advisorsMenu;
     private TechTreePanel? _techTreePanel;
@@ -196,6 +197,10 @@ public partial class MapRenderer : TileMapLayer
         _borderRenderer = new BorderRenderer();
         GetParent().CallDeferred(Node.MethodName.AddChild, _borderRenderer);
 
+        // Instantiate Pollution renderer
+        _pollutionRenderer = new PollutionRenderer();
+        GetParent().CallDeferred(Node.MethodName.AddChild, _pollutionRenderer);
+
         // Instantiate HUD
         _hud = new GameHud();
         _hud.OnActionTriggered += HandleHudAction;
@@ -213,6 +218,7 @@ public partial class MapRenderer : TileMapLayer
             _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
             _cityRenderer.UpdateCities(_sim);
             _borderRenderer.UpdateBorders(_sim);
+            _pollutionRenderer?.UpdatePollution(_sim);
             Unit? initial = _sim.Units.Find(u => u.Id == _selectedUnitId);
             _highlightRenderer.UpdateHighlight(_sim, initial);
             _hud.Refresh(_sim, _selectedUnitId, _selectedCityId);
@@ -986,6 +992,7 @@ public partial class MapRenderer : TileMapLayer
             case "plantation":
             case "road":
             case "railroad":
+            case "clean_pollution":
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
@@ -999,6 +1006,7 @@ public partial class MapRenderer : TileMapLayer
                             "plantation" => new Plantation(),
                             "road" => new RoadBuild(),
                             "railroad" => new RailroadBuild(),
+                            "clean_pollution" => new CleanPollution(),
                             _ => null
                         };
                         if (imp != null)
@@ -1006,7 +1014,11 @@ public partial class MapRenderer : TileMapLayer
                             var tile = _sim.Map.GetTile(selectedUnit.X, selectedUnit.Y);
                             if (tile != null && imp.CanBeBuiltOn(tile.Terrain))
                             {
-                                if (imp is RoadBuild)
+                                if (imp is CleanPollution)
+                                {
+                                    if (!tile.IsPolluted) return;
+                                }
+                                else if (imp is RoadBuild)
                                 {
                                     if (tile.HasRoad) return; // Already has road
                                 }
@@ -1121,6 +1133,7 @@ public partial class MapRenderer : TileMapLayer
         _fogRenderer.UpdateFog(_sim);
         _borderRenderer?.UpdateBorders(_sim);
         _cityRenderer?.UpdateCities(_sim);
+        _pollutionRenderer?.UpdatePollution(_sim);
         Unit? selUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
         _highlightRenderer?.UpdateHighlight(_sim, selUnit);
         _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);

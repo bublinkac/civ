@@ -115,3 +115,16 @@ public class Outpost : TileImprovement
         return terrain.Id != "ocean" && terrain.Id != "sea" && terrain.Id != "coast";
     }
 }
+
+public class CleanPollution : TileImprovement
+{
+    public override string Id => "clean_pollution";
+    public override string Name => "Clean Pollution";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 2;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return true;
+    }
+}

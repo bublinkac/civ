@@ -680,33 +680,41 @@ public partial class GameHud : CanvasLayer
                             {
                                 if (tile != null)
                                 {
-                                    if (tile.Improvement == null)
+                                    if (tile.IsPolluted)
                                     {
-                                        if (new Farm().CanBeBuiltOn(tile.Terrain))
-                                        {
-                                            var btn = CreateActionButton("🌾", "Irrigate", "I", () => OnActionTriggered?.Invoke("farm"), new Color(0.35f, 0.3f, 0.15f));
-                                            _actionsBox.AddChild(btn);
-                                        }
-                                        if (new Mine().CanBeBuiltOn(tile.Terrain))
-                                        {
-                                            var btn = CreateActionButton("⛏️", "Build Mine", "M", () => OnActionTriggered?.Invoke("mine"), new Color(0.3f, 0.3f, 0.35f));
-                                            _actionsBox.AddChild(btn);
-                                        }
-                                        if (new Plantation().CanBeBuiltOn(tile.Terrain))
-                                        {
-                                            var btn = CreateActionButton("🍇", "Plantation", "L", () => OnActionTriggered?.Invoke("plantation"), new Color(0.15f, 0.35f, 0.35f));
-                                            _actionsBox.AddChild(btn);
-                                        }
+                                        var cleanBtn = CreateActionButton("☣️", "Clean Pollut.", "P", () => OnActionTriggered?.Invoke("clean_pollution"), new Color(0.65f, 0.45f, 0.15f));
+                                        _actionsBox.AddChild(cleanBtn);
                                     }
-                                    if (!tile.HasRoad)
+                                    else
                                     {
-                                        var roadBtn = CreateActionButton("🛣️", "Build Road", "R", () => OnActionTriggered?.Invoke("road"), new Color(0.25f, 0.25f, 0.3f));
-                                        _actionsBox.AddChild(roadBtn);
-                                    }
-                                    else if (!tile.HasRailroad && sim.Research.IsResearched("steam_power"))
-                                    {
-                                        var rrBtn = CreateActionButton("🚂", "Build Railroad", "R", () => OnActionTriggered?.Invoke("railroad"), new Color(0.35f, 0.15f, 0.15f));
-                                        _actionsBox.AddChild(rrBtn);
+                                        if (tile.Improvement == null)
+                                        {
+                                            if (new Farm().CanBeBuiltOn(tile.Terrain))
+                                            {
+                                                var btn = CreateActionButton("🌾", "Irrigate", "I", () => OnActionTriggered?.Invoke("farm"), new Color(0.35f, 0.3f, 0.15f));
+                                                _actionsBox.AddChild(btn);
+                                            }
+                                            if (new Mine().CanBeBuiltOn(tile.Terrain))
+                                            {
+                                                var btn = CreateActionButton("⛏️", "Build Mine", "M", () => OnActionTriggered?.Invoke("mine"), new Color(0.3f, 0.3f, 0.35f));
+                                                _actionsBox.AddChild(btn);
+                                            }
+                                            if (new Plantation().CanBeBuiltOn(tile.Terrain))
+                                            {
+                                                var btn = CreateActionButton("🍇", "Plantation", "L", () => OnActionTriggered?.Invoke("plantation"), new Color(0.15f, 0.35f, 0.35f));
+                                                _actionsBox.AddChild(btn);
+                                            }
+                                        }
+                                        if (!tile.HasRoad)
+                                        {
+                                            var roadBtn = CreateActionButton("🛣️", "Build Road", "R", () => OnActionTriggered?.Invoke("road"), new Color(0.25f, 0.25f, 0.3f));
+                                            _actionsBox.AddChild(roadBtn);
+                                        }
+                                        else if (!tile.HasRailroad && sim.Research.IsResearched("steam_power"))
+                                        {
+                                            var rrBtn = CreateActionButton("🚂", "Build Railroad", "R", () => OnActionTriggered?.Invoke("railroad"), new Color(0.35f, 0.15f, 0.15f));
+                                            _actionsBox.AddChild(rrBtn);
+                                        }
                                     }
                                 }
                             }
@@ -762,7 +770,7 @@ public partial class GameHud : CanvasLayer
         int empUnitsCount = sim.Units.Count(u => u.Faction == Faction.Player);
         string diplStr = sim.IsAtWarWithAi ? "🔴 WAR WITH AI RIVAL" : "Peace with AI Rival";
 
-        _detailsLabel.Text = $"--- EMPIRE SUMMARY: {sim.PlayerCiv.Name.ToUpper()} ({sim.PlayerCiv.LeaderName.ToUpper()}) (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit}) ---\n" +
+        _detailsLabel.Text = $"--- EMPIRE SUMMARY: {sim.PlayerCiv.Name.ToUpper()} ({sim.PlayerCiv.LeaderName.ToUpper()}) (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit} - {TurnTimeline.GetFormattedYear(sim.TurnNumber)}) ---\n" +
                              $"Diplomacy: {diplStr}  |  Cities: {empCitiesCount} (Total Pop: {empPop})  |  Active Units: {empUnitsCount}\n" +
                              $"Research: {sim.Research.GetResearchStatusString()}\n" +
                              $"Tip: Press [SPACE] or click END TURN to finish your turn and restore movement points.";

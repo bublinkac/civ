@@ -59,6 +59,7 @@ public class TileData
     }
     public bool HasRoad { get; set; } = false;
     public bool HasRailroad { get; set; } = false;
+    public bool IsPolluted { get; set; } = false;
     public string? OwnerCityId { get; set; }
     public TileImprovement? Improvement { get; set; }
 
@@ -68,6 +69,11 @@ public class TileData
     {
         get
         {
+            if (IsPolluted)
+            {
+                return new TileYield(0, 0, 0);
+            }
+
             var baseYield = BaseYield;
             int food = baseYield.Food;
             int production = baseYield.Production;

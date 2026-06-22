@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 
 namespace CivGame.Core;
@@ -118,6 +119,13 @@ public class City
     public int LastTurnWaste { get; set; } = 0;
     public int LastTurnCorruption { get; set; } = 0;
 
+    // Culture and Happiness properties
+    public int AccumulatedCulture { get; set; } = 0;
+    public bool IsInDisorder { get; set; } = false;
+    public int HappyCitizens { get; set; } = 0;
+    public int ContentCitizens { get; set; } = 1;
+    public int UnhappyCitizens { get; set; } = 0;
+
     // Resource storage (accumulated yields)
     public int StoredFood { get; set; }
     public int StoredProduction { get; set; }
@@ -160,6 +168,98 @@ public class City
             >= 7 => CityType.City,
             _ => CityType.Town
         };
+    }
+
+    public int GetCulturePerTurn()
+    {
+        int culturePerTurn = 0;
+        foreach (var b in Buildings)
+        {
+            if (b.Id == "temple") culturePerTurn += 2;
+            else if (b.Id == "library") culturePerTurn += 3;
+            else if (b.Id == "monument") culturePerTurn += 1;
+            else if (b.Id == "cathedral") culturePerTurn += 4;
+            else if (b.Id == "university") culturePerTurn += 4;
+            else if (b.Id == "research_lab") culturePerTurn += 2;
+            else if (b is Wonder wonder)
+            {
+                culturePerTurn += wonder.IsNationalWonder ? 1 : 2;
+            }
+        }
+        return culturePerTurn;
+    }
+
+    public void UpdateCitizenMood(GameSimulation sim)
+    {
+        int pop = Population;
+        if (pop <= 0) return;
+
+        // Base content citizens depending on difficulty (2 base content citizens)
+        int baseContent = 2;
+        
+        int happy = 0;
+        int content = Math.Min(pop, baseContent);
+        int unhappy = Math.Max(0, pop - baseContent);
+
+        // 1. Military Police (MP) effect (up to 2 stationed warriors/archers convert unhappy to content)
+        int mpCount = sim.Units.Count(u => u.X == X && u.Y == Y && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
+        int mpEffect = Math.Min(2, mpCount);
+        if (unhappy > 0 && mpEffect > 0)
+        {
+            int toConvert = Math.Min(unhappy, mpEffect);
+            unhappy -= toConvert;
+            content += toConvert;
+        }
+
+        // 2. Buildings effect
+        int happinessBuildings = 0;
+        if (Buildings.Any(b => b.Id == "temple")) happinessBuildings += 1;
+        if (Buildings.Any(b => b.Id == "colosseum")) happinessBuildings += 2;
+        if (Buildings.Any(b => b.Id == "cathedral")) happinessBuildings += 3;
+
+        if (unhappy > 0 && happinessBuildings > 0)
+        {
+            int toConvert = Math.Min(unhappy, happinessBuildings);
+            unhappy -= toConvert;
+            content += toConvert;
+            happinessBuildings -= toConvert;
+        }
+        if (content > 0 && happinessBuildings > 0)
+        {
+            int toConvert = Math.Min(content, happinessBuildings);
+            content -= toConvert;
+            happy += toConvert;
+        }
+
+        // 3. Luxuries effect (connected luxuries Wine, Gems, Fur, Spices)
+        int luxuriesCount = 0;
+        bool hasLuxuries = Buildings.Any(b => b.Id == "marketplace") || Population > 2;
+        if (hasLuxuries)
+        {
+            luxuriesCount = 2;
+            if (Buildings.Any(b => b.Id == "marketplace")) luxuriesCount = 4;
+        }
+
+        if (unhappy > 0 && luxuriesCount > 0)
+        {
+            int toConvert = Math.Min(unhappy, luxuriesCount);
+            unhappy -= toConvert;
+            content += toConvert;
+            luxuriesCount -= toConvert;
+        }
+        if (content > 0 && luxuriesCount > 0)
+        {
+            int toConvert = Math.Min(content, luxuriesCount);
+            content -= toConvert;
+            happy += toConvert;
+        }
+
+        HappyCitizens = happy;
+        ContentCitizens = content;
+        UnhappyCitizens = unhappy;
+
+        // Civil Disorder if unhappy > happy and population is greater than 1
+        IsInDisorder = unhappy > happy && pop > 1;
     }
 
     public City(string id, string name, int x, int y, int foundedYear, Faction faction = Faction.Player, string? civilizationId = null)

@@ -308,6 +308,10 @@ public partial class DomesticAdvisorPanel : PanelContainer
             }
             
             var cityLabel = city.IsCapital ? $"👑 {city.Name}" : city.Name;
+            if (city.IsInDisorder)
+            {
+                cityLabel = $"🔥 {cityLabel} [REVOLT]";
+            }
             var row = CreateRow(
                 cityLabel,
                 food.ToString(),
