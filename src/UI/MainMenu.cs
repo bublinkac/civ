@@ -12,8 +12,8 @@ namespace CivGame.UI;
 /// </summary>
 public partial class MainMenu : CanvasLayer
 {
-    /// <summary>Fired when the player clicks START GAME. Args: width, height, seed, playerCivId, aiCivId.</summary>
-    public event Action<int, int, int, string, string>? OnStartGame;
+    /// <summary>Fired when the player clicks START GAME. Passes resolved setup options.</summary>
+    public event Action<GameSetupOptions>? OnStartGame;
 
     /// <summary>Fired when the player chooses to load an existing save.</summary>
     public event Action? OnLoadGame;
@@ -36,6 +36,11 @@ public partial class MainMenu : CanvasLayer
     private SpinBox? _seedInput;
     private OptionButton? _playerCivInput;
     private OptionButton? _aiCivInput;
+    private OptionButton? _waterInput;
+    private OptionButton? _ageInput;
+    private OptionButton? _climateInput;
+    private OptionButton? _tempInput;
+    private OptionButton? _difficultyInput;
 
     // Containers for different screens
     private Control? _titleScreenContainer;
@@ -404,10 +409,16 @@ public partial class MainMenu : CanvasLayer
         _aiCivInput.AddThemeFontSizeOverride("font_size", 13);
         civHBox.AddChild(_aiCivInput);
 
-        // Populate dropdowns with registered civilizations
-        int defaultPlayerIdx = 0;
-        int defaultAiIdx = 0;
-        int idx = 0;
+        // Populate dropdowns with registered civilizations (with Random as index 0)
+        _playerCivInput.AddItem("🎲 Random Civilization");
+        _playerCivInput.SetItemMetadata(0, "random");
+        _aiCivInput.AddItem("🎲 Random Civilization");
+        _aiCivInput.SetItemMetadata(0, "random");
+
+        int defaultPlayerIdx = 0; // Default to Random, but if Rome/Babylon are found, we can preselect them
+        int defaultAiIdx = 0;     // Default to Random
+
+        int idx = 1; // start at 1 because index 0 is Random
         foreach (var civ in CivilizationRegistry.BaseGame)
         {
             _playerCivInput.AddItem($"{civ.Name} ({civ.LeaderName})");
@@ -446,6 +457,101 @@ public partial class MainMenu : CanvasLayer
         _aiCivInput.Selected = defaultAiIdx;
 
         mainVBox.AddChild(civHBox);
+
+        // Geographic parameters grid (2x2 layout: Water, Age, Climate, Temp)
+        var geoGrid = new GridContainer { Columns = 4 };
+        geoGrid.AddThemeConstantOverride("h_separation", 12);
+        geoGrid.AddThemeConstantOverride("v_separation", 6);
+        geoGrid.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+
+        // Water Option
+        var waterLabel = new Label { Text = "Water:", HorizontalAlignment = HorizontalAlignment.Right };
+        waterLabel.AddThemeFontSizeOverride("font_size", 13);
+        waterLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.8f));
+        geoGrid.AddChild(waterLabel);
+
+        _waterInput = new OptionButton();
+        _waterInput.CustomMinimumSize = new Vector2(130, 28);
+        _waterInput.AddThemeFontSizeOverride("font_size", 12);
+        _waterInput.AddItem("60% Water");
+        _waterInput.AddItem("70% Water");
+        _waterInput.AddItem("80% Water");
+        _waterInput.AddItem("🎲 Random");
+        _waterInput.Selected = 1; // Default 70% Water
+        geoGrid.AddChild(_waterInput);
+
+        // Geological Age Option
+        var ageLabel = new Label { Text = "Age:", HorizontalAlignment = HorizontalAlignment.Right };
+        ageLabel.AddThemeFontSizeOverride("font_size", 13);
+        ageLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.8f));
+        geoGrid.AddChild(ageLabel);
+
+        _ageInput = new OptionButton();
+        _ageInput.CustomMinimumSize = new Vector2(130, 28);
+        _ageInput.AddThemeFontSizeOverride("font_size", 12);
+        _ageInput.AddItem("3 Billion (Young)");
+        _ageInput.AddItem("4 Billion (Normal)");
+        _ageInput.AddItem("5 Billion (Old)");
+        _ageInput.AddItem("🎲 Random");
+        _ageInput.Selected = 1; // Default 4 Billion
+        geoGrid.AddChild(_ageInput);
+
+        // Climate Option
+        var climateLabel = new Label { Text = "Climate:", HorizontalAlignment = HorizontalAlignment.Right };
+        climateLabel.AddThemeFontSizeOverride("font_size", 13);
+        climateLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.8f));
+        geoGrid.AddChild(climateLabel);
+
+        _climateInput = new OptionButton();
+        _climateInput.CustomMinimumSize = new Vector2(130, 28);
+        _climateInput.AddThemeFontSizeOverride("font_size", 12);
+        _climateInput.AddItem("Arid (Dry)");
+        _climateInput.AddItem("Normal");
+        _climateInput.AddItem("Wet (Lush)");
+        _climateInput.AddItem("🎲 Random");
+        _climateInput.Selected = 1; // Default Normal
+        geoGrid.AddChild(_climateInput);
+
+        // Temperature Option
+        var tempLabel = new Label { Text = "Temp:", HorizontalAlignment = HorizontalAlignment.Right };
+        tempLabel.AddThemeFontSizeOverride("font_size", 13);
+        tempLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.8f));
+        geoGrid.AddChild(tempLabel);
+
+        _tempInput = new OptionButton();
+        _tempInput.CustomMinimumSize = new Vector2(130, 28);
+        _tempInput.AddThemeFontSizeOverride("font_size", 12);
+        _tempInput.AddItem("Warm (Tropical)");
+        _tempInput.AddItem("Temperate");
+        _tempInput.AddItem("Cold (Arctic)");
+        _tempInput.AddItem("🎲 Random");
+        _tempInput.Selected = 1; // Default Temperate
+        geoGrid.AddChild(_tempInput);
+
+        mainVBox.AddChild(geoGrid);
+
+        // Difficulty selection row
+        var diffHBox = new HBoxContainer();
+        diffHBox.AddThemeConstantOverride("separation", 12);
+        diffHBox.Alignment = BoxContainer.AlignmentMode.Center;
+
+        var diffLabel = new Label { Text = "Difficulty:" };
+        diffLabel.AddThemeFontSizeOverride("font_size", 14);
+        diffLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.72f, 0.12f));
+        diffHBox.AddChild(diffLabel);
+
+        _difficultyInput = new OptionButton();
+        _difficultyInput.CustomMinimumSize = new Vector2(180, 28);
+        _difficultyInput.AddThemeFontSizeOverride("font_size", 12);
+        foreach (var level in DifficultySettings.AllLevels)
+        {
+            var settings = DifficultySettings.Get(level);
+            _difficultyInput.AddItem(settings.DisplayName);
+        }
+        _difficultyInput.Selected = 2; // Default: Regent
+        diffHBox.AddChild(_difficultyInput);
+
+        mainVBox.AddChild(diffHBox);
 
         // Seed row
         var seedHBox = new HBoxContainer();
@@ -590,7 +696,39 @@ public partial class MainMenu : CanvasLayer
             aiCivId = (string)_aiCivInput.GetItemMetadata(_aiCivInput.Selected);
         }
 
-        OnStartGame?.Invoke(opt.Width, opt.Height, seed, playerCivId, aiCivId);
+        string waterStr = _waterInput != null && _waterInput.Selected >= 0 
+            ? (_waterInput.Selected == 3 ? "random" : _waterInput.Text.Replace(" Water", "")) 
+            : "70%";
+
+        string ageStr = _ageInput != null && _ageInput.Selected >= 0 
+            ? (_ageInput.Selected == 3 ? "random" : _ageInput.Text.Replace(" (Young)", "").Replace(" (Normal)", "").Replace(" (Old)", "")) 
+            : "4 Billion";
+
+        string climateStr = _climateInput != null && _climateInput.Selected >= 0 
+            ? (_climateInput.Selected == 3 ? "random" : _climateInput.Text.Replace(" (Dry)", "").Replace(" (Lush)", "")) 
+            : "Normal";
+
+        string tempStr = _tempInput != null && _tempInput.Selected >= 0 
+            ? (_tempInput.Selected == 3 ? "random" : _tempInput.Text.Replace(" (Tropical)", "").Replace(" (Arctic)", "")) 
+            : "Temperate";
+
+        var setupOptions = new GameSetupOptions
+        {
+            Width = opt.Width,
+            Height = opt.Height,
+            Seed = seed,
+            PlayerCivId = playerCivId,
+            AiCivId = aiCivId,
+            WaterPercentage = waterStr,
+            GeologicalAge = ageStr,
+            Climate = climateStr,
+            Temperature = tempStr,
+            Difficulty = _difficultyInput != null && _difficultyInput.Selected >= 0
+                ? DifficultySettings.AllLevels[_difficultyInput.Selected]
+                : DifficultyLevel.Regent
+        };
+
+        OnStartGame?.Invoke(setupOptions);
     }
 
     private static StyleBoxFlat CreatePanelStyle(Color bg, Color border, float borderWidth = 2, float cornerRadius = 6)

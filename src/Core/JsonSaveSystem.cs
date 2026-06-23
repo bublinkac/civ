@@ -137,6 +137,22 @@ public class JsonSaveSystem : ISaveSystem
             dto.ResearchedTechIds.Add(techId);
         }
 
+        // AI Researched Technologies
+        foreach (var techId in sim.AiResearchedTechs)
+        {
+            dto.AiResearchedTechIds.Add(techId);
+        }
+
+        // AI Research progress
+        dto.AiCurrentResearchId = sim.AiCurrentResearchId;
+        dto.AiScienceProgress = sim.AiScienceProgress;
+
+        // Spaceship parts
+        foreach (var part in sim.BuiltSpaceshipParts)
+            dto.BuiltSpaceshipParts.Add(part.ToString());
+        foreach (var part in sim.AiBuiltSpaceshipParts)
+            dto.AiBuiltSpaceshipParts.Add(part.ToString());
+
         // Serialize to file
         string path = GetSavePath(slotName);
         var options = new JsonSerializerOptions { WriteIndented = true };
@@ -172,7 +188,7 @@ public class JsonSaveSystem : ISaveSystem
                 }
             }
 
-            sim.LoadSimulationState(
+             sim.LoadSimulationState(
                 dto.TurnNumber,
                 dto.IsAtWarWithAi,
                 dto.EndState,
@@ -191,8 +207,23 @@ public class JsonSaveSystem : ISaveSystem
                 dto.CurrentResearchId,
                 dto.CurrentScienceProgress,
                 dto.LastTurnScienceGenerated,
-                camps
+                camps,
+                dto.AiResearchedTechIds
             );
+
+            // Restore AI research progress
+            sim.AiCurrentResearchId = dto.AiCurrentResearchId;
+            sim.AiScienceProgress = dto.AiScienceProgress;
+
+            // Restore spaceship parts
+            sim.BuiltSpaceshipParts.Clear();
+            foreach (var partStr in dto.BuiltSpaceshipParts)
+                if (Enum.TryParse<ProductionProject>(partStr, out var pp))
+                    sim.BuiltSpaceshipParts.Add(pp);
+            sim.AiBuiltSpaceshipParts.Clear();
+            foreach (var partStr in dto.AiBuiltSpaceshipParts)
+                if (Enum.TryParse<ProductionProject>(partStr, out var pp))
+                    sim.AiBuiltSpaceshipParts.Add(pp);
 
             // Reconstruct Visibility Grid
             int index = 0;

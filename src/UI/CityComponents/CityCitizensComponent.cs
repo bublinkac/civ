@@ -21,7 +21,7 @@ public partial class CityCitizensComponent : PanelContainer
         AddChild(hbox);
 
         // Update citizen mood dynamically based on simulation rules
-        city.UpdateCitizenMood(sim);
+        city.UpdateCitizenMood(sim, sim.DifficultyConfig);
 
         int happyCount = city.HappyCitizens;
         int contentCount = city.ContentCitizens;

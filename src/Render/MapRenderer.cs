@@ -102,11 +102,11 @@ public partial class MapRenderer : TileMapLayer
 
         // Show Main Menu first
         _mainMenu = new MainMenu();
-        _mainMenu.OnStartGame += (width, height, seed, playerCivId, aiCivId) =>
+        _mainMenu.OnStartGame += (setupOptions) =>
         {
             _mainMenu.QueueFree();
             _mainMenu = null;
-            StartGame(width, height, seed, playerCivId, aiCivId);
+            StartGame(setupOptions);
         };
         _mainMenu.OnLoadGame += () =>
         {
@@ -144,18 +144,21 @@ public partial class MapRenderer : TileMapLayer
         SetupCamera();
     }
 
-    private void StartGame(int width, int height, int seed, string playerCivId = "rome", string aiCivId = "babylon")
+    private void StartGame(GameSetupOptions setupOptions)
     {
-        MapWidth = width;
-        MapHeight = height;
-        Seed = seed;
+        var resolved = setupOptions.ResolveRandom();
 
-        // 2. Initialize Map Data and Game Simulation
+        MapWidth = resolved.Width;
+        MapHeight = resolved.Height;
+        Seed = resolved.Seed;
+
+        // 2. Initialize Map Data and Game Simulation with customized setup options
         var generator = new MapGenerator(Seed);
-        var map = generator.Generate(MapWidth, MapHeight);
+        var map = generator.Generate(resolved);
         _sim = new GameSimulation(map);
-        _sim.PlayerCivId = playerCivId;
-        _sim.AiCivId = aiCivId;
+        _sim.PlayerCivId = resolved.PlayerCivId;
+        _sim.AiCivId = resolved.AiCivId;
+        _sim.Difficulty = resolved.Difficulty;
         _sim.SetupInitialUnits();
 
         // 3. Programmatically configure TileSet for Isometric layout
@@ -394,6 +397,8 @@ public partial class MapRenderer : TileMapLayer
                 break;
             case "mountain":
                 return DrawMountainImage(width, height);
+            case "volcano":
+                return DrawVolcanoImage(width, height);
             default:
                 topColor = Colors.Gray;
                 borderColor = Colors.DarkGray;
@@ -518,12 +523,120 @@ public partial class MapRenderer : TileMapLayer
         return img;
     }
 
+    private Image DrawVolcanoImage(int width, int height)
+    {
+        Image img = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
+        img.Fill(new Color(0, 0, 0, 0));
+
+        Color grassBase = new Color(0.2f, 0.65f, 0.2f);
+        Color volcanoColor = new Color(0.22f, 0.22f, 0.24f); // Basalt charcoal gray
+        Color shadowColor = new Color(0.14f, 0.14f, 0.16f);  // Extra dark shadow side
+        Color magmaRed = new Color(0.95f, 0.25f, 0.05f);     // Fiery orange/red magma
+        Color magmaOrange = new Color(0.98f, 0.6f, 0.1f);    // Bright orange glowing hot spots
+        Color smokeColor = new Color(0.4f, 0.4f, 0.4f, 0.65f); // Ash smoke plume
+        Color outlineColor = new Color(0.1f, 0.4f, 0.1f);
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                double dx = Math.Abs(x - 128.0) / 128.0;
+                double dy = Math.Abs(y - 64.0) / 64.0;
+                double dist = dx + dy;
+
+                if (dist <= 1.0)
+                {
+                    if (dist > 0.95)
+                    {
+                        img.SetPixel(x, y, outlineColor);
+                    }
+                    else
+                    {
+                        img.SetPixel(x, y, grassBase);
+                    }
+                }
+
+                // Volcanic mountain cone (y from 20 to 92)
+                if (y >= 20 && y <= 92)
+                {
+                    double factor = (y - 20) / 72.0;
+                    int halfWidth = (int)(factor * 60.0);
+                    
+                    int leftX = 128 - halfWidth;
+                    int rightX = 128 + halfWidth;
+
+                    if (x >= leftX && x <= rightX)
+                    {
+                        if (x == leftX || x == rightX || y == 92)
+                        {
+                            img.SetPixel(x, y, new Color(0.1f, 0.1f, 0.1f)); // Dark border outline
+                        }
+                        else if (y < 35) // Crater / Lava pit at the top
+                        {
+                            int rimDist = Math.Abs(x - 128);
+                            if (rimDist < (y - 18)) // Magma core inside the crater
+                            {
+                                if ((x + y) % 3 == 0)
+                                {
+                                    img.SetPixel(x, y, magmaOrange);
+                                }
+                                else
+                                {
+                                    img.SetPixel(x, y, magmaRed);
+                                }
+                            }
+                            else // Dark basalt crater rim
+                            {
+                                img.SetPixel(x, y, volcanoColor);
+                            }
+                        }
+                        else // Main body of the volcanic mountain
+                        {
+                            if (x < 128)
+                            {
+                                img.SetPixel(x, y, volcanoColor);
+                            }
+                            else
+                            {
+                                img.SetPixel(x, y, shadowColor);
+                            }
+                        }
+                    }
+                }
+
+                // Smoke Plume rising from the crater (y from 0 to 19, centered on 128)
+                if (y < 20)
+                {
+                    int smokeHalfWidth = (int)(3.0 + (20.0 - y) * 0.45);
+                    int smokeLeftX = 128 - smokeHalfWidth;
+                    int smokeRightX = 128 + smokeHalfWidth;
+
+                    if (x >= smokeLeftX && x <= smokeRightX)
+                    {
+                        double billow = (Math.Sin(x * 0.4) * Math.Cos(y * 0.4) + 1.0) / 2.0;
+                        if (billow > 0.35)
+                        {
+                            Color currentPixel = img.GetPixel(x, y);
+                            if (currentPixel.A == 0)
+                            {
+                                float alphaBlend = (float)(billow * 0.65f * (y / 20.0f));
+                                img.SetPixel(x, y, new Color(smokeColor.R, smokeColor.G, smokeColor.B, alphaBlend));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return img;
+    }
+
         // Need a stable mapping for TileSet IDs
         private Dictionary<string, int> _terrainToId = new()
         {
             {"grassland", 0}, {"plains", 1}, {"desert", 2}, {"tundra", 3}, {"hills", 4}, 
             {"mountain", 5}, {"forest", 6}, {"jungle", 7}, {"marsh", 8}, {"floodplains", 9}, 
-            {"ocean", 10}, {"sea", 11}, {"coast", 12}
+            {"ocean", 10}, {"sea", 11}, {"coast", 12}, {"volcano", 13}
         };
 
     private void RenderMap()

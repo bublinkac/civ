@@ -580,8 +580,11 @@ public partial class GameHud : CanvasLayer
         {
             _gameEndOverlay.Visible = true;
 
-            bool isVictory = sim.EndState == GameEndState.VictoryDomination || 
-                             sim.EndState == GameEndState.VictoryScience || 
+            bool isVictory = sim.EndState == GameEndState.VictoryConquest ||
+                             sim.EndState == GameEndState.VictoryDomination ||
+                             sim.EndState == GameEndState.VictorySpaceRace ||
+                             sim.EndState == GameEndState.VictoryCultural ||
+                             sim.EndState == GameEndState.VictoryDiplomatic ||
                              sim.EndState == GameEndState.VictoryScore;
 
             _endGameTitle.Text = isVictory ? "🏆 VICTORY!" : "💀 DEFEAT!";
@@ -589,11 +592,18 @@ public partial class GameHud : CanvasLayer
 
             _endGameReason.Text = sim.EndState switch
             {
-                GameEndState.VictoryDomination => "VICTORY BY DOMINATION!\nYour glorious armies have captured the enemy capital and united the world under your banner.",
-                GameEndState.VictoryScience => "SCIENTIFIC VICTORY!\nYour scholars have unlocked all secrets of the universe, leading humanity into a futuristic golden age.",
-                GameEndState.VictoryScore => "VICTORY BY SCORE!\nTime has run out, and your civilization stands as the undisputed peak of global accomplishment.",
-                GameEndState.DefeatDomination => "DEFEAT!\nYour cities have fallen, and your empire has been erased from history.",
-                GameEndState.DefeatScore => "DEFEAT BY SCORE!\nTime expired, and the AI Rival achieved a superior score. Your legacy is lost to time.",
+                GameEndState.VictoryConquest  => "CONQUEST VICTORY!\nYour armies have eliminated every rival civilization. The world bows to your power.",
+                GameEndState.VictoryDomination=> "DOMINATION VICTORY!\nYour civilization controls two-thirds of the world's land and population.",
+                GameEndState.VictorySpaceRace => "SPACE RACE VICTORY!\nYour spaceship has launched to Alpha Centauri — humanity's first interstellar colony!",
+                GameEndState.VictoryCultural  => "CULTURAL VICTORY!\nOne of your cities has become a legendary beacon of culture that transformed the world.",
+                GameEndState.VictoryDiplomatic=> "DIPLOMATIC VICTORY!\nYou were elected world leader by the United Nations. The world trusts your leadership.",
+                GameEndState.VictoryScore     => "VICTORY BY SCORE!\nTime has run out and your civilization stands as the peak of global accomplishment.",
+                GameEndState.DefeatConquest   => "DEFEAT!\nYour cities have fallen — your empire has been erased from history.",
+                GameEndState.DefeatDomination => "DEFEAT BY DOMINATION!\nThe AI Rival controls two-thirds of the world's land and population.",
+                GameEndState.DefeatCultural   => "DEFEAT BY CULTURE!\nAn AI city has achieved legendary cultural dominance over the world.",
+                GameEndState.DefeatSpaceRace  => "DEFEAT BY SPACE RACE!\nThe AI Rival launched their spaceship to Alpha Centauri first!",
+                GameEndState.DefeatDiplomatic => "DEFEAT BY DIPLOMACY!\nThe AI Rival was elected world leader by the United Nations.",
+                GameEndState.DefeatScore      => "DEFEAT BY SCORE!\nTime expired and the AI Rival achieved a superior score. Your legacy is lost to time.",
                 _ => ""
             };
 

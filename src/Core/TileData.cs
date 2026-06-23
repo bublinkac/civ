@@ -11,6 +11,7 @@ public enum TerrainType
     Jungle,
     Marsh,
     Mountain,
+    Volcano,
     Ocean,
     Plains,
     Sea,
@@ -62,6 +63,10 @@ public class TileData
     public bool IsPolluted { get; set; } = false;
     public string? OwnerCityId { get; set; }
     public TileImprovement? Improvement { get; set; }
+
+    /// <summary>True for Ocean, Sea and Coast tiles — not counted as land for Domination.</summary>
+    public bool IsOcean => Terrain.Id == "ocean" || Terrain.Id == "sea" || Terrain.Id == "coast";
+
 
     public TileYield BaseYield => Terrain.BaseYield;
 

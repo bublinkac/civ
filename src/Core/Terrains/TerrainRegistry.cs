@@ -90,6 +90,7 @@ public static class TerrainRegistry
             ["jungle"] = new() { Id = "jungle", Name = "Jungle", Food = 1, Shields = 0, Commerce = 0, MovementCost = 2, DefenseBonusPercent = 50, Color = new Color(0.2f, 0.5f, 0.2f) },
             ["marsh"] = new() { Id = "marsh", Name = "Marsh", Food = 0, Shields = 0, Commerce = 0, MovementCost = 2, DefenseBonusPercent = 25, Color = new Color(0.3f, 0.5f, 0.4f) },
             ["mountain"] = new() { Id = "mountain", Name = "Mountain", Food = 0, Shields = 1, Commerce = 0, MovementCost = 2, DefenseBonusPercent = 50, Color = new Color(0.4f, 0.4f, 0.42f) },
+            ["volcano"] = new() { Id = "volcano", Name = "Volcano", Food = 0, Shields = 3, Commerce = 0, MovementCost = 2, DefenseBonusPercent = 50, Color = new Color(0.18f, 0.15f, 0.15f) },
             ["ocean"] = new() { Id = "ocean", Name = "Ocean", Food = 1, Shields = 0, Commerce = 1, MovementCost = 1, DefenseBonusPercent = 10, Color = new Color(0.1f, 0.28f, 0.65f) },
             ["plains"] = new() { Id = "plains", Name = "Plains", Food = 1, Shields = 1, Commerce = 0, MovementCost = 1, DefenseBonusPercent = 10, Color = new Color(0.55f, 0.48f, 0.25f) },
             ["sea"] = new() { Id = "sea", Name = "Sea", Food = 1, Shields = 0, Commerce = 1, MovementCost = 1, DefenseBonusPercent = 10, Color = new Color(0.2f, 0.4f, 0.75f) },

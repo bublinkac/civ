@@ -91,7 +91,12 @@ public class SaveDataDto
     
     // Research stats
     public List<string> ResearchedTechIds { get; set; } = new();
+    public List<string> AiResearchedTechIds { get; set; } = new();
     public string? CurrentResearchId { get; set; }
     public int CurrentScienceProgress { get; set; }
     public int LastTurnScienceGenerated { get; set; }
+    public string? AiCurrentResearchId { get; set; }
+    public int AiScienceProgress { get; set; }
+    public List<string> BuiltSpaceshipParts { get; set; } = new();
+    public List<string> AiBuiltSpaceshipParts { get; set; } = new();
 }

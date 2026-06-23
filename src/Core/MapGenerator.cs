@@ -16,6 +16,16 @@ public class MapGenerator
 
     public GameMap Generate(int width, int height)
     {
+        return Generate(new GameSetupOptions { Width = width, Height = height, Seed = _seed });
+    }
+
+    public GameMap Generate(GameSetupOptions options)
+    {
+        // Resolve any random selections (like Random civs, Random climate, etc.)
+        var resolved = options.ResolveRandom();
+        int width = resolved.Width;
+        int height = resolved.Height;
+
         var map = new GameMap(width, height);
 
         for (int x = 0; x < width; x++)
@@ -31,7 +41,17 @@ public class MapGenerator
                 double elevation = NoiseOctave(nx * 3.5, ny * 3.5, 4, 0.5);
                 double moisture = NoiseOctave(nx * 4.5 + 15.0, ny * 4.5 + 15.0, 3, 0.5);
 
-                TerrainType terrainType = DetermineTerrain(elevation, moisture, latitude);
+                // Apply Climate modifier to moisture
+                if (resolved.Climate == "Arid")
+                {
+                    moisture -= 0.15;
+                }
+                else if (resolved.Climate == "Wet")
+                {
+                    moisture += 0.15;
+                }
+
+                TerrainType terrainType = DetermineTerrain(elevation, moisture, latitude, resolved);
                 Resource? resource = DetermineResource(terrainType, x, y);
                 Terrain terrain = TerrainRegistry.Get(terrainType.ToString().ToLower())!;
 
@@ -42,34 +62,88 @@ public class MapGenerator
         return map;
     }
 
-    private static TerrainType DetermineTerrain(double elevation, double moisture, double latitude)
+    private static TerrainType DetermineTerrain(double elevation, double moisture, double latitude, GameSetupOptions options)
     {
-        // 1. Water bands
-        if (elevation < 0.28)
+        // 1. Water bands based on Water Coverage option
+        double oceanCutoff = 0.28;
+        double seaCutoff = 0.36;
+        double coastCutoff = 0.44;
+
+        if (options.WaterPercentage == "60%")
+        {
+            oceanCutoff = 0.21;
+            seaCutoff = 0.28;
+            coastCutoff = 0.35;
+        }
+        else if (options.WaterPercentage == "80%")
+        {
+            oceanCutoff = 0.36;
+            seaCutoff = 0.44;
+            coastCutoff = 0.52;
+        }
+
+        if (elevation < oceanCutoff)
         {
             return TerrainType.Ocean;
         }
-        if (elevation < 0.36)
+        if (elevation < seaCutoff)
         {
             return TerrainType.Sea;
         }
-        if (elevation < 0.44)
+        if (elevation < coastCutoff)
         {
             return TerrainType.Coast;
         }
 
-        // 2. Polar bands
-        if (latitude > 0.72)
+        // 2. Polar bands based on Temperature option
+        double polarCutoff = 0.72;
+        double tropicalCutoff = 0.45;
+
+        if (options.Temperature == "Cold")
+        {
+            polarCutoff = 0.58;
+            tropicalCutoff = 0.30;
+        }
+        else if (options.Temperature == "Warm")
+        {
+            polarCutoff = 0.84;
+            tropicalCutoff = 0.55;
+        }
+
+        if (latitude > polarCutoff)
         {
             return TerrainType.Tundra;
         }
 
-        // 3. High altitude check
-        if (elevation > 0.86)
+        // 3. High altitude check based on Geological Age option
+        double mountainCutoff = 0.86;
+        double hillsCutoff = 0.77;
+        double volcanoChance = 0.15;
+
+        if (options.GeologicalAge == "3 Billion")
         {
+            mountainCutoff = 0.82;
+            hillsCutoff = 0.72;
+            volcanoChance = 0.25;
+        }
+        else if (options.GeologicalAge == "5 Billion")
+        {
+            mountainCutoff = 0.90;
+            hillsCutoff = 0.82;
+            volcanoChance = 0.05;
+        }
+
+        if (elevation > mountainCutoff)
+        {
+            // Deterministically make a fraction of mountain ranges into Volcanoes
+            double volVal = (elevation * 1000) % 1.0;
+            if (volVal < volcanoChance)
+            {
+                return TerrainType.Volcano;
+            }
             return TerrainType.Mountain;
         }
-        if (elevation > 0.77)
+        if (elevation > hillsCutoff)
         {
             return TerrainType.Hills;
         }
@@ -89,7 +163,7 @@ public class MapGenerator
         }
         if (moisture > 0.68)
         {
-            return latitude < 0.45 ? TerrainType.Jungle : TerrainType.Forest;
+            return latitude < tropicalCutoff ? TerrainType.Jungle : TerrainType.Forest;
         }
         if (moisture > 0.54)
         {
@@ -114,6 +188,7 @@ public class MapGenerator
         {TerrainType.Jungle, "jungle"},
         {TerrainType.Marsh, "marsh"},
         {TerrainType.Mountain, "mountain"},
+        {TerrainType.Volcano, "volcano"},
         {TerrainType.Ocean, "ocean"},
         {TerrainType.Plains, "plains"},
         {TerrainType.Sea, "sea"},

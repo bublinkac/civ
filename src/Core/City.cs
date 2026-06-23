@@ -121,10 +121,13 @@ public class City
 
     // Culture and Happiness properties
     public int AccumulatedCulture { get; set; } = 0;
+    /// <summary>Culture generated per turn (base 1 + building/wonder bonuses).</summary>
+    public int CultureOutput { get; set; } = 1;
     public bool IsInDisorder { get; set; } = false;
     public int HappyCitizens { get; set; } = 0;
     public int ContentCitizens { get; set; } = 1;
     public int UnhappyCitizens { get; set; } = 0;
+
 
     // Resource storage (accumulated yields)
     public int StoredFood { get; set; }
@@ -189,17 +192,23 @@ public class City
         return culturePerTurn;
     }
 
-    public void UpdateCitizenMood(GameSimulation sim)
+    public void UpdateCitizenMood(GameSimulation sim, DifficultySettings? difficulty = null)
     {
         int pop = Population;
         if (pop <= 0) return;
 
-        // Base content citizens depending on difficulty (2 base content citizens)
-        int baseContent = 2;
+        // Base content citizens depending on difficulty (Regent = 2 base content citizens)
+        int baseContent = difficulty?.BaseContentCitizens ?? 2;
+        int baseUnhappy = difficulty?.BaseUnhappyCitizens ?? 0;
         
         int happy = 0;
         int content = Math.Min(pop, baseContent);
-        int unhappy = Math.Max(0, pop - baseContent);
+        int unhappy = Math.Max(0, pop - baseContent) + baseUnhappy;
+        // Ensure total doesn't exceed population
+        if (content + unhappy > pop)
+        {
+            unhappy = Math.Max(0, pop - content);
+        }
 
         // 1. Military Police (MP) effect (up to 2 stationed warriors/archers convert unhappy to content)
         int mpCount = sim.Units.Count(u => u.X == X && u.Y == Y && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
@@ -213,9 +222,12 @@ public class City
 
         // 2. Buildings effect
         int happinessBuildings = 0;
-        if (Buildings.Any(b => b.Id == "temple")) happinessBuildings += 1;
+        int templeBonus = HasTrait(CivTrait.Religious) ? 2 : 1;
+        int cathedralBonus = HasTrait(CivTrait.Religious) ? 4 : 3;
+
+        if (Buildings.Any(b => b.Id == "temple")) happinessBuildings += templeBonus;
         if (Buildings.Any(b => b.Id == "colosseum")) happinessBuildings += 2;
-        if (Buildings.Any(b => b.Id == "cathedral")) happinessBuildings += 3;
+        if (Buildings.Any(b => b.Id == "cathedral")) happinessBuildings += cathedralBonus;
 
         if (unhappy > 0 && happinessBuildings > 0)
         {
@@ -278,6 +290,31 @@ public class City
         return Buildings.Exists(b => b is T);
     }
 
+    public bool HasTrait(CivTrait trait)
+    {
+        return Civilization != null && (Civilization.Trait1 == trait || Civilization.Trait2 == trait);
+    }
+
+    public bool IsCoastal(GameMap map)
+    {
+        int[] dxs = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        int[] dys = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        for (int i = 0; i < 8; i++)
+        {
+            int tx = X + dxs[i];
+            int ty = Y + dys[i];
+            if (map.IsInBounds(tx, ty))
+            {
+                var tile = map.GetTile(tx, ty);
+                if (tile != null && (tile.Terrain.Id == "coast" || tile.Terrain.Id == "sea" || tile.Terrain.Id == "ocean"))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public int GetTotalMaintenance() => Buildings.Sum(b => b.MaintenanceCost);
 
     public T? GetBuilding<T>() where T : Building
@@ -285,9 +322,9 @@ public class City
         return Buildings.Find(b => b is T) as T;
     }
 
-    public int GetProjectCost(ProductionProject project)
+    public int GetProjectCost(ProductionProject project, DifficultySettings? difficulty = null)
     {
-        return project switch
+        int baseCost = project switch
         {
             ProductionProject.Explorer => 10,
             ProductionProject.Settler => 20,
@@ -296,6 +333,72 @@ public class City
             ProductionProject.Archer => 20,
             _ => GetBuildingCostFromRegistry(project)
         };
+
+        if (Faction == Faction.AiRival && difficulty != null)
+        {
+            bool isUnit = project == ProductionProject.Explorer ||
+                          project == ProductionProject.Settler ||
+                          project == ProductionProject.Worker ||
+                          project == ProductionProject.Warrior ||
+                          project == ProductionProject.Archer;
+            if (isUnit)
+            {
+                baseCost = (int)Math.Max(1, Math.Round(baseCost * difficulty.AiProductionCostMultiplier));
+            }
+        }
+
+        // Apply Civ3 trait discounts (50% reduction for specific buildings/units)
+        if (HasTrait(CivTrait.Scientific))
+        {
+            if (project == ProductionProject.Library || project == ProductionProject.University || project == ProductionProject.ResearchLab)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Agricultural))
+        {
+            if (project == ProductionProject.Granary)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Militaristic))
+        {
+            if (project == ProductionProject.Barracks || project == ProductionProject.CoastalFortress)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Religious))
+        {
+            if (project == ProductionProject.Temple || project == ProductionProject.Cathedral)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Commercial))
+        {
+            if (project == ProductionProject.Marketplace || project == ProductionProject.Bank || project == ProductionProject.StockExchange)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Seafaring))
+        {
+            if (project == ProductionProject.Harbor || project == ProductionProject.CommercialDock)
+            {
+                return baseCost / 2;
+            }
+        }
+        if (HasTrait(CivTrait.Expansionist))
+        {
+            if (project == ProductionProject.Explorer)
+            {
+                return baseCost / 2;
+            }
+        }
+
+        return baseCost;
     }
 
     private int GetBuildingCostFromRegistry(ProductionProject project)

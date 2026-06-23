@@ -142,7 +142,19 @@ public class Unit
         if (Type != UnitType.Worker) return;
 
         ImprovementUnderConstruction = imp;
-        ConstructionTurnsRemaining = imp.ConstructionTurns;
+
+        int baseTurns = imp.ConstructionTurns;
+        bool isIndustrious = Civilization != null && (Civilization.Trait1 == CivTrait.Industrious || Civilization.Trait2 == CivTrait.Industrious);
+        if (isIndustrious)
+        {
+            // Industrious workers build improvements 50% faster (half the turns, rounded up)
+            ConstructionTurnsRemaining = Math.Max(1, (int)Math.Ceiling(baseTurns / 2.0f));
+        }
+        else
+        {
+            ConstructionTurnsRemaining = baseTurns;
+        }
+
         RemainingMovement = 0; // Consumes movement for the starting turn
     }
 
