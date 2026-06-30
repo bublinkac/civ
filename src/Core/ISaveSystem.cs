@@ -99,4 +99,8 @@ public class SaveDataDto
     public int AiScienceProgress { get; set; }
     public List<string> BuiltSpaceshipParts { get; set; } = new();
     public List<string> AiBuiltSpaceshipParts { get; set; } = new();
+
+    // Histograph data
+    public List<HistographEntry> PlayerHistograph { get; set; } = new();
+    public List<HistographEntry> AiHistograph { get; set; } = new();
 }

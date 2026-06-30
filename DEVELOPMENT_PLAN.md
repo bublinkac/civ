@@ -167,5 +167,299 @@ This document serves as an overview of achieved progress and a high-level plan f
 - [x] **End-to-End Integration:** Difficulty flows from `MainMenu` → `GameSetupOptions` → `MapRenderer.StartGame` → `GameSimulation.Difficulty` → all affected systems, with `DifficultyConfig` accessor providing cached settings throughout the simulation.
 - [x] **Compile Safety:** Build verified successfully with zero errors.
 
+## Phase 25 — Victory Conditions (Full Implementation)
+
+Implemented all 6 Civ3 victory types for both player and AI, plus AI research system.
+
+### Victory Types
+- [x] **Conquest Victory:** Eliminate all rival cities + settlers → `VictoryConquest` / `DefeatConquest`
+- [x] **Domination Victory:** Control 2/3 of world's land tiles AND 2/3 of population → `VictoryDomination` / `DefeatDomination` (both player and AI checked)
+- [x] **Cultural Victory:** Any single city accumulates 50,000+ culture → `VictoryCultural` / `DefeatCultural` (both player and AI checked)
+- [x] **Diplomatic Victory:** Build United Nations wonder + control >50% population → `VictoryDiplomatic` / `DefeatDiplomatic` (both factions)
+- [x] **Space Race Victory:** Build Apollo Program + all 10 spaceship parts → `VictorySpaceRace` / `DefeatSpaceRace` (tracked for both player `BuiltSpaceshipParts` and AI `AiBuiltSpaceshipParts`)
+- [x] **Histograph (Score) Victory:** Turn limit reached, compare scores → `VictoryScore` / `DefeatScore`
+
+### AI Research System
+- [x] **AI Research Tracking:** `AiResearchedTechs`, `AiCurrentResearchId`, `AiScienceProgress` fields in `GameSimulation`
+- [x] **ProcessAiResearch():** AI accumulates science from city commerce each turn, picks cheapest available tech with prerequisites met, auto-researches
+- [x] **Integration:** Called in `EndTurn()` after `ProcessAiRivalTurn()`
+- [x] **AI Score Fix:** `CalculateScore` now uses actual `AiResearchedTechs.Count` instead of rough approximation
+- [x] **CultureOutput Update:** `city.CultureOutput` set each turn in `CollectCityYields` alongside `AccumulatedCulture`
+
+### Save System Updates
+- [x] Added `AiCurrentResearchId`, `AiScienceProgress`, `BuiltSpaceshipParts`, `AiBuiltSpaceshipParts` to `SaveDataDto`
+- [x] Full serialization/deserialization in `JsonSaveSystem`
+
+### UI Updates
+- [x] All new defeat states (`DefeatDomination`, `DefeatCultural`, `DefeatSpaceRace`, `DefeatDiplomatic`) added to `GameEndState` enum with corresponding messages in `GameHud`
+
+## Phase 26 — Advisor System (Civ3-Authentic)
+
+Full 6-advisor system matching Civ3's F1-F6 keybinding layout.
+
+### Advisor Panels
+| Key | Advisor | File | Status |
+|-----|---------|------|--------|
+| F1 | Domestic | `DomesticAdvisorPanel.cs` | Full — economy, tax slider, per-city table |
+| F2 | Trade | `TradeAdvisorPanel.cs` | New — commerce overview, treasury stats, city trade table |
+| F3 | Military | `MilitaryAdvisorPanel.cs` | Wired — army comparison, unit roster, threat assessment |
+| F4 | Foreign | `ForeignAdvisorPanel.cs` | New — diplomacy table, war/peace status, rival civ info |
+| F5 | Cultural | `CulturalAdvisorPanel.cs` | Full rewrite — Civ3 culture levels, Top 5 ranking, wonders, victory progress |
+| F6 | Science | `TechTreePanel.cs` | Full — tech tree with era tabs, advisor overlay |
+
+### AdvisorsMenu Redesign
+- [x] All 6 advisors listed in Civ3 F1-F6 order with color-coded buttons, hotkey labels, and descriptions
+- [x] Unified dark modal style with gold accent borders
+
+### Cultural Advisor (Civ3-Faithful)
+- [x] **Advisor portrait + speech bubble:** Context-sensitive advice (recommends Monuments → Temples → Libraries → Cathedrals)
+- [x] **National stats panel:** Total culture, per-turn output, best city, victory fraction
+- [x] **City Culture Table:** Columns for City, Culture/Turn, Total, Level with zebra striping
+- [x] **Civ3 Culture Levels:** Unknown → Fledgling (10) → Developing (100) → Refined (1000) → Influential (5000) → Distinguished (10000) → Legendary (50000) with color-coded labels
+- [x] **Top 5 Cities Ranking:** Combined player + AI cities ranked by culture (green = player, red = rival)
+- [x] **Wonders List:** All player wonders with hosting city names
+
+### MapRenderer Integration
+- [x] Added fields for all 4 new panels (`_militaryAdvisorPanel`, `_foreignAdvisorPanel`, `_culturalAdvisorPanel`, `_tradeAdvisorPanel`)
+- [x] Opener methods wired to `AdvisorsMenu` events
+- [x] F1-F6 keyboard hotkeys for direct advisor access
+- [x] `IsFullScreenUiOpen` updated to include all panels
+
+---
+
+## Phase 27: Happiness, War Weariness & Government System
+
+### Government System (`src/Core/Government.cs`) — Civ3 Complete v1.22
+- [x] **GovernmentType enum:** Despotism, Monarchy, Republic, Democracy, Communism, Feudalism, Fascism
+- [x] **HurryMethod enum:** None, ForcedLabor (1 pop = 20 shields), PayCitizens (4 gold = 1 shield)
+- [x] **CorruptionLevel enum:** Minimal, Nuisance, Problematic, Communal, Rampant, Catastrophic
+- [x] **Government class** with full Civ3-authentic properties per type:
+  - **Unit Support per Town/City/Metropolis** (pop 1-6 / 7-12 / 13+):
+    - Despotism: 4/4/4, Monarchy: 2/4/8, Republic: 1/3/4, Democracy: 0/0/0
+    - Communism: 6/6/6, Feudalism: 5/2/1, Fascism: 4/7/10
+  - **Unit Support Cost:** 1gpt (most), Republic 2gpt, Feudalism 3gpt
+  - **Worker Efficiency:** Despotism 50%, Democracy 150%, Fascism 200%, rest 100%
+  - **Hurry Method:** Despotism=None, Monarchy/Republic/Democracy=PayCitizens, Communism/Feudalism/Fascism=ForcedLabor
+  - **Military Police:** Despotism 2, Monarchy 3, Communism 4, Fascism 4, Feudalism 3, Republic/Democracy 0
+  - **War Weariness:** None (Despotism/Monarchy/Communism/Fascism), Low (Republic/Feudalism), High (Democracy)
+  - **Draft Rate:** 0-4 citizens per city per turn depending on government
+  - **Corruption:** Communal flat for Communism, distance-based for others (CorruptionModifier applied)
+  - **Commerce Bonus:** Republic/Democracy +1 commerce on tiles producing ≥1
+  - **Tile Penalty:** Despotism/Feudalism -1 on any yield ≥ 3
+  - **Anarchy duration:** 2-8 turns depending on government
+- [x] **GameSimulation state:** `PlayerGovernment`, `AiGovernment`, `AnarchyTurnsRemaining`
+- [x] **Worker efficiency** applied to `ProcessWorkerConstruction` (50%=half speed, 200%=double)
+- [x] **Government commerce bonus** (+1 commerce) applied in `CollectCityYields`
+- [x] **Despotism tile penalty** (-1 on yields ≥ 3) applied in `CollectCityYields`
+- [x] **Corruption uses government type:** Communal=flat 20%, others=distance×modifier
+
+### War Weariness (`src/Core/GameSimulation.cs`)
+- [x] **WWP (War Weariness Points) tracking** — Civ3-authentic thresholds: 0-30 no effect, 31-60 level 1, 61-90 level 2, 91-120 level 3, 121+ level 4
+- [x] **WWP accumulation:**
+  - +1 per turn with player units in enemy territory
+  - +2 per unit lost in combat
+  - Defensive war offset: -30 WWP initial (delayed WW when AI attacks first)
+  - Natural decay when not at war: 1/20 per turn
+  - Passive decay when quiet (no units in either territory): -1/turn if level >= 1
+- [x] **Effect on citizens** (Republic):
+  - Level 1: 25% unhappy, Level 2: 50%, Level 3: 50%, Level 4: 100%
+- [x] **Effect on citizens** (Democracy):
+  - Level 1: 50% unhappy, Level 2: 100%, Level 3+: revolt/anarchy
+- [x] **Police Station** reduces WW effect by 25%
+- [x] **OnWarDeclared / OnPeaceSigned** lifecycle hooks
+
+### Citizen Mood Calculation (`src/Core/City.cs`)
+- [x] **5-step Civ3-authentic calculation:**
+  1. Base distribution (difficulty-based content/unhappy citizens)
+  2. War weariness (Republic/Democracy — converts content→unhappy)
+  3. Military police (government-limited — converts unhappy→content)
+  4. Buildings (Temple 1, Colosseum 2, Cathedral 3 content faces; Religious trait bonuses)
+  5. Luxuries (connected resources → happy faces; Marketplace amplifies per Civ3 formula: tiers of 2 → 1/2/3/4 faces each)
+- [x] **Civil Disorder:** Triggers when unhappy > happy and population > 1
+- [x] **Faction-aware:** Military police uses city's own faction units, government selection per faction
+
+### AI Integration (`src/Core/AI/AiRivalBrain.cs`)
+- [x] **Happiness-aware production planning:**
+  - AI updates citizen mood before choosing production
+  - Priority 0 (above defense): Build happiness buildings when in disorder
+  - Escalation chain: Temple → Colosseum → Cathedral → Marketplace
+  - AI considers tech prerequisites before choosing happiness buildings
+- [x] **Faction-correct calculations:** AI cities use `AiGovernment` for all mood/police/WW checks
+
+### Unit Support Cost (`src/Core/GameSimulation.cs`)
+- [x] **Civ3 formula:** Free unit slots per city based on city size (Town/City/Metropolis)
+  - Uses `Government.GetUnitSupport(population)` — Town: pop 1-6, City: pop 7-12, Metro: pop 13+
+  - Total free slots = sum of all player cities' allowances
+  - Excess units × `UnitSupportCost` deducted from gold each turn
+- [x] **Deducted from treasury** each turn after commerce/maintenance calculation
+- [x] **Bankruptcy disbanding:** If treasury goes negative, strongest non-settler/worker unit is disbanded
+- [x] **LastTurnUnitSupport** property exposed for UI display
+- [x] **Console logging** with breakdown (excess units × cost, government free slots)
+
+---
+
+## Phase 28: Golden Age (Civ3-authentic)
+
+### GoldenAge Class (`src/Core/Civilization.cs`)
+- [x] **Duration:** 20 turns
+- [x] **One-time only:** `HasBeenUsed` flag prevents re-triggering
+- [x] **Trigger method** with faction name + reason logging
+- [x] **ProcessTurn** countdown with end message
+
+### Triggers (`src/Core/GameSimulation.cs`)
+- [x] **Unique Unit Victory:** First combat victory with a UU triggers Golden Age
+  - Checked via `CivilizationId`, `ReplacedUnitType`, and UU bonus presence
+  - Works for both attacker and defender winning
+- [x] **Wonder Completion:** Building a wonder whose `AssociatedTraits` match BOTH civ traits
+  - 17 wonders have trait associations (Pyramids=Agricultural+Industrious, etc.)
+  - `CheckWonderGoldenAgeTrigger` called from `Wonder.OnCompleted`
+
+### Yield Bonus (`src/Core/GameSimulation.cs` → `CollectCityYields`)
+- [x] **+1 Production** on every worked tile producing ≥1 production
+- [x] **+1 Commerce** on every worked tile producing ≥1 commerce
+- [x] Applies to center tile and all citizen-worked tiles
+- [x] Works for both Player and AI factions
+
+### Wonder Trait Associations (`src/Core/Wonder.cs`)
+- [x] `AssociatedTraits` property on `Wonder` base class
+- [x] `GenericWonder` accepts optional `traits` parameter
+- [x] Authentic Civ3 mappings:
+  - Pyramids: Agricultural + Industrious
+  - Hanging Gardens: Agricultural + Religious
+  - Colossus: Commercial + Seafaring
+  - Great Wall: Militaristic + Expansionist
+  - Statue of Zeus: Militaristic + Religious
+  - Oracle: Religious + Scientific
+  - Knights Hall: Militaristic + Industrious
+  - Leonardo's Workshop: Scientific + Industrious
+  - Shakespeare's Theatre: Commercial + Religious
+  - Sun Tzu's War Academy: Militaristic + Scientific
+  - Cure for Cancer: Agricultural + Scientific
+  - Sistine Chapel: Religious + Industrious
+  - Hermitage: Expansionist + Religious
+  - Smith's Mansion: Commercial + Scientific
+  - Train Station: Industrious + Commercial
+  - Internet: Scientific + Commercial
+  - Longevity Vaccine: Agricultural + Religious
+
+---
+
+## Phase 29: Revolution & Anarchy System
+
+### Government Change (`src/Core/GameSimulation.cs`)
+- [x] **ChangeGovernment(type)** — starts revolution with random anarchy duration
+- [x] **CanChangeGovernment(type)** — checks tech prereqs, not in anarchy, not same gov
+- [x] **GetAvailableGovernments()** — returns governments player has unlocked
+- [x] **PendingGovernment** — tracks which government will be installed after anarchy
+- [x] **IsInAnarchy** property for easy checks
+- [x] **Anarchy duration** — random within gov-specific range (2-8 turns)
+- [x] **Religious trait** — anarchy reduced to 1 turn
+- [x] **Leaving Despotism** — no anarchy (instant switch)
+- [x] **Anarchy countdown** — processed each turn, installs PendingGovernment when done
+
+### Anarchy Effects (`src/Core/GameSimulation.cs` → `CollectCityYields`)
+- [x] **NO production** — all player cities produce 0 production during anarchy
+- [x] **NO commerce** — all player cities produce 0 commerce (no gold, no science)
+- [x] **Subsistence food** — cities get exactly enough food to not starve (pop × 2)
+- [x] Applied AFTER all other yield calculations, BEFORE civil disorder check
+
+### Government Panel UI (`src/UI/GovernmentPanel.cs`)
+- [x] **Full-screen panel** with parchment style (matches advisor panels)
+- [x] **Current status banner** — shows current government or anarchy countdown
+- [x] **Government cards** for all 7 types showing:
+  - Name, required tech, lock status
+  - Worker efficiency, military police, war weariness, draft rate
+  - Unit support (Town/City/Metropolis), cost, corruption level, hurry method
+  - Special bonuses/penalties (tile penalty, commerce bonus, communal corruption)
+- [x] **Revolution button** per available government with confirmation dialog
+- [x] **Anarchy warning** in confirmation (shows duration range, effects)
+
+### HUD Integration (`src/UI/GameHud.cs`, `src/Render/MapRenderer.cs`)
+- [x] **Government button** in top bar: shows "⚖ {GovName}" or "⚠ ANARCHY (N)"
+- [x] **Red text** during anarchy for visibility
+- [x] **F7 keyboard shortcut** for quick access
+- [x] **UI refresh** after government change
+
+---
+
+## Phase 30: Starvation & Civil Disorder (Civ3-authentic)
+
+### Starvation (`src/Core/GameSimulation.cs` → `CollectCityYields`)
+- [x] **Population loss** when StoredFood < 0 and pop > 1
+- [x] **Building destruction** — most expensive non-essential building destroyed on starvation
+  - Palace and Granary protected from destruction
+- [x] **StoredFood reset** to 0 after population loss (no soft cushion)
+- [x] **Pop 1 protection** — city cannot shrink below 1 citizen
+
+### Civil Disorder (`src/Core/GameSimulation.cs` → `CollectCityYields`)
+- [x] **Production halted** — 0 production during disorder
+- [x] **Commerce halted** — 0 commerce (no gold, no science)
+- [x] **Food surplus halted** — food capped at subsistence (pop × 2), no growth
+- [x] **DisorderTurns counter** — tracks consecutive turns in disorder (`src/Core/City.cs`)
+- [x] **Democracy collapse** — 3+ turns of continuous disorder triggers automatic revolution to Despotism (4 turns anarchy)
+
+### AI Awareness (`src/Core/AI/AiRivalBrain.cs`)
+- [x] **Starvation priority** — AI builds Granary when city has negative food (priority 0a, above disorder)
+- [x] **Disorder priority** — AI already builds happiness buildings (Temple → Colosseum → Cathedral → Marketplace)
+
+---
+
+## Phase 31: Irrigation Chain (Civ3-authentic)
+
+### HasIrrigationAccess (`src/Core/GameSimulation.cs`)
+- [x] **Fresh water adjacency:** Farm can be built if adjacent to coast or floodplains
+- [x] **City as source:** Cities act as irrigation sources (adjacent tiles can be irrigated)
+- [x] **Irrigation chain:** Farm can be built if adjacent to another existing Farm
+- [x] **Electricity bypass:** After researching Electricity, irrigation can be built anywhere
+- [x] Checks all 8 adjacent tiles (including diagonals)
+
+### Player Enforcement (`src/Render/MapRenderer.cs`)
+- [x] Farm building blocked with message if no irrigation access
+- [x] Existing improvement check preserved
+
+### AI Enforcement (`src/Core/AI/AiRivalBrain.cs`)
+- [x] AI checks `HasIrrigationAccess` before building Farm
+- [x] Falls back to Mine if terrain supports it but no irrigation available
+
+### UI (`src/UI/GameHud.cs`)
+- [x] Irrigate button only visible when `HasIrrigationAccess` returns true
+
+---
+
+## Phase 32: Histograph (Civ3-style)
+
+### Data Model (`src/Core/HistographData.cs`)
+- [x] **HistographEntry** — per-turn snapshot: Turn, Score, Population, Territory, Culture, Military
+- [x] **HistographData** — holds `PlayerHistory` and `AiHistory` lists
+- [x] **RecordTurn()** — captures stats for both factions each turn
+- [x] **5 categories:** Score, Population, Territory, Culture, Military
+- [x] **Military power:** sum of AttackStrength + DefenseStrength of all units
+
+### Recording (`src/Core/GameSimulation.cs`)
+- [x] `Histograph.RecordTurn(this)` called at end of each turn before turn counter increment
+
+### Persistence (`src/Core/ISaveSystem.cs`, `src/Core/JsonSaveSystem.cs`)
+- [x] `PlayerHistograph` and `AiHistograph` in `SaveDataDto`
+- [x] Saved/loaded with full turn history
+
+### UI Panel (`src/UI/HistographPanel.cs`)
+- [x] **Dark themed** full-screen panel with gold border
+- [x] **Category buttons** — Score / Population / Territory / Culture / Military
+- [x] **Line graph** — Player (blue) vs AI (red) lines drawn with Godot `_Draw()`
+- [x] **Grid lines** — 5 horizontal + up to 10 vertical with axis labels
+- [x] **Legend** — colored indicators for Player and AI civ names
+- [x] **Endpoint values** — dot + value label at the latest data point
+- [x] **Dynamic Y-axis** — auto-scales to max value + 10% headroom
+
+### Integration
+- [x] **📊 Histograph** button in HUD top bar
+- [x] **F8 keyboard shortcut**
+- [x] `open_histograph` action handler in MapRenderer
+
+### Future TODOs
+- Trade Advisor: Trade route visualization, luxury/strategic resource deals, import/export
+- Foreign Advisor: Embassy system, tech/map trading, alliance proposals, multi-civ support
+- Cultural Advisor: Culture borders map overlay, culture flip warnings, culture rate graph
+- Happiness: Entertainment slider, We Love The King Day (WLTKD), Entertainers specialist
 
 

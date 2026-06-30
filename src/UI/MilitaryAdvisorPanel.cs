@@ -6,357 +6,491 @@ using System.Collections.Generic;
 
 namespace CivGame.UI;
 
+/// <summary>
+/// Civ3-authentic Military Advisor (F3).
+/// Two view modes: "View by Unit Type" and "View by City".
+/// Shows all individual units with HP, position, status, attack/defense.
+/// </summary>
 public partial class MilitaryAdvisorPanel : PanelContainer
 {
     private GameSimulation _sim;
+    private VBoxContainer _contentContainer;
+    private Button _viewByUnitBtn;
+    private Button _viewByCityBtn;
+    private bool _viewByCity = false;
 
     public MilitaryAdvisorPanel(GameSimulation sim)
     {
         _sim = sim;
         Name = "MilitaryAdvisorPanel";
-        
-        // Ensure it acts as an overlay
-        SetAnchorsPreset(LayoutPreset.FullRect);
 
-        // Semi-transparent background
+        SetAnchorsPreset(LayoutPreset.FullRect);
+        MouseFilter = MouseFilterEnum.Stop;
+
+        // Civ3 parchment background
         var styleBox = new StyleBoxFlat
         {
-            BgColor = new Color(0.9f, 0.88f, 0.8f, 0.95f), // Civ 3 parchment style
-            BorderWidthTop = 4,
-            BorderWidthBottom = 4,
-            BorderWidthLeft = 4,
-            BorderWidthRight = 4,
-            BorderColor = new Color(0.7f, 0.6f, 0.4f),
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8
+            BgColor = new Color(0.91f, 0.87f, 0.78f, 1.0f),
+            BorderWidthTop = 5, BorderWidthBottom = 5, BorderWidthLeft = 5, BorderWidthRight = 5,
+            BorderColor = new Color(0.55f, 0.4f, 0.25f),
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
         };
         AddThemeStyleboxOverride("panel", styleBox);
 
-        // Handle input to prevent clicks from passing through
-        MouseFilter = MouseFilterEnum.Stop;
-
-        // --- MAIN CANVAS AREA ---
-        var canvasBorder = new PanelContainer();
-        canvasBorder.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        canvasBorder.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        var canvasStyle = new StyleBoxEmpty();
-        canvasBorder.AddThemeStyleboxOverride("panel", canvasStyle);
-        
-        // Outer Margin
-        var margin = new MarginContainer();
-        margin.AddThemeConstantOverride("margin_top", 20);
-        margin.AddThemeConstantOverride("margin_bottom", 20);
-        margin.AddThemeConstantOverride("margin_left", 30);
-        margin.AddThemeConstantOverride("margin_right", 30);
-        margin.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        margin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        var outerMargin = new MarginContainer();
+        outerMargin.AddThemeConstantOverride("margin_top", 12);
+        outerMargin.AddThemeConstantOverride("margin_bottom", 12);
+        outerMargin.AddThemeConstantOverride("margin_left", 16);
+        outerMargin.AddThemeConstantOverride("margin_right", 16);
+        outerMargin.SizeFlagsVertical = SizeFlags.ExpandFill;
+        outerMargin.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 
         var mainVBox = new VBoxContainer();
-        mainVBox.AddThemeConstantOverride("separation", 20);
+        mainVBox.AddThemeConstantOverride("separation", 8);
 
-        // --- HEADER ---
+        // ═══════════════════════════════════════════════
+        // HEADER BAR
+        // ═══════════════════════════════════════════════
+        var headerPanel = new PanelContainer();
+        var headerStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.45f, 0.2f, 0.15f),
+            ContentMarginLeft = 10, ContentMarginRight = 10, ContentMarginTop = 6, ContentMarginBottom = 6
+        };
+        headerPanel.AddThemeStyleboxOverride("panel", headerStyle);
         var headerHBox = new HBoxContainer();
-        
         var titleLabel = new Label
         {
             Text = "M I L I T A R Y   A D V I S O R",
             HorizontalAlignment = HorizontalAlignment.Center,
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+            SizeFlagsHorizontal = SizeFlags.ExpandFill
         };
-        titleLabel.AddThemeFontSizeOverride("font_size", 28);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
-        
-        // Close Button
-        var closeBtn = new Button { Text = "✖", Flat = true, CustomMinimumSize = new Vector2(40, 40) };
-        closeBtn.AddThemeColorOverride("font_color", new Color(0.8f, 0.2f, 0.2f));
-        closeBtn.AddThemeFontSizeOverride("font_size", 24);
+        titleLabel.AddThemeFontSizeOverride("font_size", 24);
+        titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.9f, 0.75f));
+
+        var closeBtn = new Button { Text = "\u2716", Flat = true, CustomMinimumSize = new Vector2(36, 36) };
+        closeBtn.AddThemeColorOverride("font_color", new Color(0.95f, 0.8f, 0.6f));
+        closeBtn.AddThemeFontSizeOverride("font_size", 20);
         closeBtn.Pressed += () => QueueFree();
 
         headerHBox.AddChild(titleLabel);
         headerHBox.AddChild(closeBtn);
-        mainVBox.AddChild(headerHBox);
+        headerPanel.AddChild(headerHBox);
+        mainVBox.AddChild(headerPanel);
 
-        // --- TOP STATS ROW ---
-        var topStatsHBox = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        topStatsHBox.AddThemeConstantOverride("separation", 30);
-
+        // ═══════════════════════════════════════════════
+        // ADVISOR ROW: portrait + speech + stats
+        // ═══════════════════════════════════════════════
         int playerUnitCount = _sim.Units.Count(u => u.Faction == Faction.Player);
         int aiUnitCount = _sim.Units.Count(u => u.Faction == Faction.AiRival);
+        int playerMilitary = _sim.Units.Count(u => u.Faction == Faction.Player && u.AttackStrength > 0);
+        int totalAttack = _sim.Units.Where(u => u.Faction == Faction.Player).Sum(u => u.AttackStrength);
+        int totalDefense = _sim.Units.Where(u => u.Faction == Faction.Player).Sum(u => u.DefenseStrength);
 
-        // Army size stats
-        var armySizeVBox = new VBoxContainer();
-        armySizeVBox.AddThemeConstantOverride("separation", 0);
-        
-        var totalUnitsBox = CreateStatBox("Total Units", playerUnitCount.ToString(), new Color(0.9f, 0.9f, 0.6f));
-        var allowedUnitsBox = CreateStatBox("Allowed Units", "0", new Color(0.6f, 0.9f, 0.6f));
-        var supportCostBox = CreateStatBox("Army Support Cost", $"{playerUnitCount} gold/turn", new Color(0.9f, 0.6f, 0.6f));
-        
-        armySizeVBox.AddChild(totalUnitsBox);
-        armySizeVBox.AddChild(allowedUnitsBox);
-        armySizeVBox.AddChild(supportCostBox);
+        var advisorRow = new HBoxContainer();
+        advisorRow.AddThemeConstantOverride("separation", 12);
 
-        // Advisor Message
-        string message = "We are evenly matched.";
-        if (playerUnitCount > aiUnitCount * 1.5f) message = "Compared to these guys, we have a strong military!";
-        else if (playerUnitCount > aiUnitCount) message = "We have a slightly larger military.";
-        else if (playerUnitCount < aiUnitCount * 0.5f) message = "We are significantly outnumbered!";
-        else if (playerUnitCount < aiUnitCount) message = "They have a larger military than us.";
+        // Portrait
+        var portraitPanel = new PanelContainer { CustomMinimumSize = new Vector2(80, 90) };
+        var portraitStyle = new StyleBoxFlat { BgColor = new Color(0.4f, 0.2f, 0.15f, 0.9f), CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6, CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6 };
+        portraitPanel.AddThemeStyleboxOverride("panel", portraitStyle);
+        var portraitLabel = new Label { Text = "\u2694\ufe0f", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        portraitLabel.AddThemeFontSizeOverride("font_size", 48);
+        portraitPanel.AddChild(portraitLabel);
+        advisorRow.AddChild(portraitPanel);
 
-        var advisorBox = new HBoxContainer();
-        advisorBox.AddThemeConstantOverride("separation", 10);
-        var advisorPortrait = new Label { Text = "🧑‍✈️" };
-        advisorPortrait.AddThemeFontSizeOverride("font_size", 48);
-        
-        var messagePanel = new PanelContainer();
-        var msgStyle = new StyleBoxFlat { BgColor = Colors.White, BorderColor = Colors.DarkGreen, BorderWidthTop = 2, BorderWidthBottom = 2, BorderWidthLeft = 2, BorderWidthRight = 2 };
-        messagePanel.AddThemeStyleboxOverride("panel", msgStyle);
-        var msgMargin = new MarginContainer { CustomMinimumSize = new Vector2(300, 100) };
-        msgMargin.AddThemeConstantOverride("margin_left", 10);
-        msgMargin.AddThemeConstantOverride("margin_right", 10);
-        msgMargin.AddThemeConstantOverride("margin_top", 10);
-        var msgLabel = new Label { Text = message, AutowrapMode = TextServer.AutowrapMode.Word, HorizontalAlignment = HorizontalAlignment.Left };
-        msgLabel.AddThemeColorOverride("font_color", Colors.Black);
-        msgMargin.AddChild(msgLabel);
-        messagePanel.AddChild(msgMargin);
-
-        advisorBox.AddChild(advisorPortrait);
-        advisorBox.AddChild(messagePanel);
-
-        topStatsHBox.AddChild(armySizeVBox);
-        topStatsHBox.AddChild(advisorBox);
-        
-        mainVBox.AddChild(topStatsHBox);
-
-        // --- DIVIDER ---
-        var divider = new ColorRect { CustomMinimumSize = new Vector2(0, 2), Color = new Color(0.5f, 0.4f, 0.3f) };
-        mainVBox.AddChild(divider);
-
-        // --- BOTTOM COLUMNS ---
-        var columnsHBox = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
-        columnsHBox.AddThemeConstantOverride("separation", 20);
-        
-        // Left Column (Player)
-        var leftColumn = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill };
-        var leftTitle = new Label { Text = $"The Army of {_sim.PlayerCiv.Name}", HorizontalAlignment = HorizontalAlignment.Center };
-        leftTitle.AddThemeColorOverride("font_color", Colors.Black);
-        leftTitle.AddThemeFontSizeOverride("font_size", 20);
-        var leftTitleBg = new ColorRect { Color = new Color(0.85f, 0.8f, 0.7f), CustomMinimumSize = new Vector2(0, 30) };
-        leftTitleBg.AddChild(new CenterContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill }.AddChildWithReturn(leftTitle));
-        leftColumn.AddChild(leftTitleBg);
-
-        var leftScroll = new ScrollContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
-        var leftList = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
-        leftList.AddThemeConstantOverride("separation", 15);
-        
-        // Group player units by type
-        var playerUnits = _sim.Units.Where(u => u.Faction == Faction.Player).GroupBy(u => u.Type).OrderBy(g => g.Key.ToString());
-        foreach (var group in playerUnits)
+        // Speech bubble
+        var speechPanel = new PanelContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        var speechStyle = new StyleBoxFlat
         {
-            leftList.AddChild(CreateUnitRow(group.Key, group.Count()));
-        }
-        leftScroll.AddChild(leftList);
-        leftColumn.AddChild(leftScroll);
+            BgColor = new Color(1.0f, 1.0f, 0.95f),
+            BorderWidthTop = 2, BorderWidthBottom = 2, BorderWidthLeft = 2, BorderWidthRight = 2,
+            BorderColor = new Color(0.5f, 0.3f, 0.2f),
+            CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6, CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6,
+            ContentMarginLeft = 12, ContentMarginRight = 12, ContentMarginTop = 8, ContentMarginBottom = 8
+        };
+        speechPanel.AddThemeStyleboxOverride("panel", speechStyle);
 
-        // Middle Divider line
-        var colDivider = new ColorRect { CustomMinimumSize = new Vector2(2, 0), Color = new Color(0.7f, 0.6f, 0.5f), SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        string message = GenerateMilitaryAdvice(playerUnitCount, aiUnitCount, playerMilitary);
+        var speechLabel = new Label { Text = message, AutowrapMode = TextServer.AutowrapMode.Word };
+        speechLabel.AddThemeFontSizeOverride("font_size", 13);
+        speechLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
+        speechPanel.AddChild(speechLabel);
+        advisorRow.AddChild(speechPanel);
 
-        // Right Column (AI Rival)
-        var rightColumn = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill };
-        var rightTitle = new Label { Text = $"The Army of {_sim.AiCiv.Name}", HorizontalAlignment = HorizontalAlignment.Center };
-        rightTitle.AddThemeColorOverride("font_color", Colors.Black);
-        rightTitle.AddThemeFontSizeOverride("font_size", 20);
-        var rightTitleBg = new ColorRect { Color = new Color(0.85f, 0.8f, 0.7f), CustomMinimumSize = new Vector2(0, 30) };
-        rightTitleBg.AddChild(new CenterContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, SizeFlagsVertical = Control.SizeFlags.ExpandFill }.AddChildWithReturn(rightTitle));
-        rightColumn.AddChild(rightTitleBg);
+        // Stats column
+        var statsVBox = new VBoxContainer { CustomMinimumSize = new Vector2(160, 0) };
+        statsVBox.AddThemeConstantOverride("separation", 2);
+        AddStatLine(statsVBox, "Total Units:", playerUnitCount.ToString(), new Color(0.1f, 0.1f, 0.5f));
+        AddStatLine(statsVBox, "Military:", playerMilitary.ToString(), new Color(0.5f, 0.15f, 0.15f));
+        AddStatLine(statsVBox, "Total ATK:", totalAttack.ToString(), new Color(0.6f, 0.2f, 0.1f));
+        AddStatLine(statsVBox, "Total DEF:", totalDefense.ToString(), new Color(0.1f, 0.3f, 0.6f));
+        AddStatLine(statsVBox, "War Status:", _sim.IsAtWarWithAi ? "AT WAR" : "Peace",
+            _sim.IsAtWarWithAi ? new Color(0.7f, 0.1f, 0.1f) : new Color(0.1f, 0.5f, 0.1f));
+        advisorRow.AddChild(statsVBox);
 
-        var rightStatus = new Label { Text = _sim.IsAtWarWithAi ? "At WAR" : "At Peace", HorizontalAlignment = HorizontalAlignment.Center };
-        rightStatus.AddThemeColorOverride("font_color", _sim.IsAtWarWithAi ? Colors.Red : Colors.DarkGreen);
-        rightStatus.AddThemeFontSizeOverride("font_size", 18);
-        rightColumn.AddChild(rightStatus);
+        mainVBox.AddChild(advisorRow);
 
-        var espionageMsg = new Label { Text = "(Espionage Required to view enemy troops)", HorizontalAlignment = HorizontalAlignment.Center };
-        espionageMsg.AddThemeColorOverride("font_color", Colors.Gray);
-        rightColumn.AddChild(espionageMsg);
+        // ═══════════════════════════════════════════════
+        // VIEW TOGGLE BUTTONS
+        // ═══════════════════════════════════════════════
+        var toggleRow = new HBoxContainer();
+        toggleRow.AddThemeConstantOverride("separation", 10);
+        toggleRow.Alignment = BoxContainer.AlignmentMode.Center;
 
-        columnsHBox.AddChild(leftColumn);
-        columnsHBox.AddChild(colDivider);
-        columnsHBox.AddChild(rightColumn);
+        _viewByUnitBtn = CreateToggleButton("View by Unit Type", true);
+        _viewByUnitBtn.Pressed += () => SwitchView(false);
+        toggleRow.AddChild(_viewByUnitBtn);
 
-        mainVBox.AddChild(columnsHBox);
-        margin.AddChild(mainVBox);
-        canvasBorder.AddChild(margin);
-        AddChild(canvasBorder);
+        _viewByCityBtn = CreateToggleButton("View by City", false);
+        _viewByCityBtn.Pressed += () => SwitchView(true);
+        toggleRow.AddChild(_viewByCityBtn);
+
+        // Enemy info label
+        toggleRow.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
+        var enemyLabel = new Label { Text = $"Enemy: {_sim.AiCiv.Name} ({aiUnitCount} units est.)" };
+        enemyLabel.AddThemeFontSizeOverride("font_size", 12);
+        enemyLabel.AddThemeColorOverride("font_color", new Color(0.5f, 0.2f, 0.2f));
+        toggleRow.AddChild(enemyLabel);
+
+        mainVBox.AddChild(toggleRow);
+
+        // ═══════════════════════════════════════════════
+        // CONTENT AREA: Map (left) + Unit List (right)
+        // ═══════════════════════════════════════════════
+        var contentSplit = new HBoxContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
+        contentSplit.AddThemeConstantOverride("separation", 10);
+
+        // Advisor Map showing all units
+        var mapOptions = new AdvisorMapOptions
+        {
+            MinSize = new Vector2(260, 180),
+            ShowUnits = true,
+            ShowCities = true,
+            ShowTerritory = true,
+            ShowCityNames = true,
+            UnitFactionFilter = null,
+            CityDotScale = 1.8f,
+            UnitDotScale = 1.2f
+        };
+        var advisorMap = new AdvisorMapPanel(_sim, mapOptions);
+        advisorMap.SizeFlagsVertical = SizeFlags.ExpandFill;
+        contentSplit.AddChild(advisorMap);
+
+        _contentContainer = new VBoxContainer { SizeFlagsVertical = SizeFlags.ExpandFill, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        contentSplit.AddChild(_contentContainer);
+        mainVBox.AddChild(contentSplit);
+
+        BuildUnitTypeView();
+
+        // ═══════════════════════════════════════════════
+        // BOTTOM BAR
+        // ═══════════════════════════════════════════════
+        var bottomPanel = new PanelContainer();
+        var bottomStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(0.45f, 0.2f, 0.15f, 0.9f),
+            ContentMarginLeft = 12, ContentMarginRight = 12, ContentMarginTop = 6, ContentMarginBottom = 6,
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
+        };
+        bottomPanel.AddThemeStyleboxOverride("panel", bottomStyle);
+
+        var bottomHBox = new HBoxContainer();
+        bottomHBox.AddThemeConstantOverride("separation", 20);
+
+        var armyStr = new Label { Text = $"Army Strength: {totalAttack + totalDefense}", VerticalAlignment = VerticalAlignment.Center };
+        armyStr.AddThemeFontSizeOverride("font_size", 13);
+        armyStr.AddThemeColorOverride("font_color", new Color(0.9f, 0.85f, 0.7f));
+        bottomHBox.AddChild(armyStr);
+
+        var supportLabel = new Label { Text = $"Support: {playerUnitCount} gold/turn", VerticalAlignment = VerticalAlignment.Center };
+        supportLabel.AddThemeFontSizeOverride("font_size", 13);
+        supportLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.7f, 0.7f));
+        bottomHBox.AddChild(supportLabel);
+
+        bottomHBox.AddChild(new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill });
+
+        var footerCloseBtn = new Button { Text = "Close", CustomMinimumSize = new Vector2(80, 28) };
+        var closeBtnStyle2 = new StyleBoxFlat { BgColor = new Color(0.6f, 0.2f, 0.1f), CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 };
+        footerCloseBtn.AddThemeStyleboxOverride("normal", closeBtnStyle2);
+        footerCloseBtn.Pressed += () => QueueFree();
+        bottomHBox.AddChild(footerCloseBtn);
+
+        bottomPanel.AddChild(bottomHBox);
+        mainVBox.AddChild(bottomPanel);
+
+        outerMargin.AddChild(mainVBox);
+        AddChild(outerMargin);
     }
 
-    private Control CreateUnitRow(UnitType type, int count)
+    private void SwitchView(bool byCity)
     {
-        var row = new HBoxContainer();
-        row.AddThemeConstantOverride("separation", 10);
-        
-        var nameLabel = new Label { Text = $"({count}) {type.ToString()}", CustomMinimumSize = new Vector2(150, 0) };
-        nameLabel.AddThemeColorOverride("font_color", Colors.Black);
-        row.AddChild(nameLabel);
+        _viewByCity = byCity;
+        UpdateToggleStyles();
 
-        var spritesHBox = new HBoxContainer();
-        spritesHBox.AddThemeConstantOverride("separation", 2);
-        
-        // Load Texture based on unit type
-        string baseName = type switch
+        // Clear content
+        foreach (var child in _contentContainer.GetChildren())
+            child.QueueFree();
+
+        if (_viewByCity)
+            BuildCityView();
+        else
+            BuildUnitTypeView();
+    }
+
+    private void UpdateToggleStyles()
+    {
+        var activeStyle = new StyleBoxFlat { BgColor = new Color(0.55f, 0.25f, 0.15f), CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 };
+        var inactiveStyle = new StyleBoxFlat { BgColor = new Color(0.3f, 0.25f, 0.2f), CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 };
+        _viewByUnitBtn.AddThemeStyleboxOverride("normal", _viewByCity ? inactiveStyle : activeStyle);
+        _viewByCityBtn.AddThemeStyleboxOverride("normal", _viewByCity ? activeStyle : inactiveStyle);
+    }
+
+    private void BuildUnitTypeView()
+    {
+        var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        var listVBox = new VBoxContainer();
+        listVBox.AddThemeConstantOverride("separation", 4);
+        listVBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+
+        var playerUnits = _sim.Units.Where(u => u.Faction == Faction.Player).ToList();
+        var grouped = playerUnits.GroupBy(u => u.Type).OrderBy(g => g.Key.ToString());
+
+        foreach (var group in grouped)
         {
-            UnitType.Explorer => "explorer",
-            UnitType.Settler => "settler",
-            UnitType.Warrior => "warrior",
-            UnitType.Archer => "archer",
-            UnitType.Barbarian => "warrior",
-            UnitType.Worker => "worker",
-            _ => type.ToString().ToLower()
-        };
-        string texturePath = $"res://assets/{baseName}_orig.webp";
-        if (!FileAccess.FileExists(texturePath))
-        {
-            texturePath = $"res://assets/{type.ToString().ToLower()}.png";
-        }
-        Texture2D? tex = null;
-        if (FileAccess.FileExists(texturePath))
-        {
-            try
+            // Group header
+            var groupHeader = new PanelContainer();
+            var ghStyle = new StyleBoxFlat { BgColor = new Color(0.8f, 0.75f, 0.65f), ContentMarginLeft = 10, ContentMarginTop = 4, ContentMarginBottom = 4 };
+            groupHeader.AddThemeStyleboxOverride("panel", ghStyle);
+            var ghLabel = new Label { Text = $"{group.Key} ({group.Count()})" };
+            ghLabel.AddThemeFontSizeOverride("font_size", 15);
+            ghLabel.AddThemeColorOverride("font_color", new Color(0.2f, 0.1f, 0.05f));
+            groupHeader.AddChild(ghLabel);
+            listVBox.AddChild(groupHeader);
+
+            // Individual units
+            bool alt = false;
+            foreach (var unit in group.OrderByDescending(u => u.Health))
             {
-                var img = Image.LoadFromFile(texturePath);
-                if (img != null && !img.IsEmpty())
+                listVBox.AddChild(CreateUnitDetailRow(unit, alt));
+                alt = !alt;
+            }
+        }
+
+        scroll.AddChild(listVBox);
+        _contentContainer.AddChild(scroll);
+    }
+
+    private void BuildCityView()
+    {
+        var scroll = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        var listVBox = new VBoxContainer();
+        listVBox.AddThemeConstantOverride("separation", 4);
+        listVBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+
+        var playerUnits = _sim.Units.Where(u => u.Faction == Faction.Player).ToList();
+        var playerCities = _sim.Cities.Where(c => c.Faction == Faction.Player).ToList();
+
+        // Assign units to nearest city
+        var cityUnitMap = new Dictionary<string, List<Unit>>();
+        var fieldUnits = new List<Unit>();
+
+        foreach (var unit in playerUnits)
+        {
+            string? closestCityId = null;
+            int closestDist = int.MaxValue;
+            foreach (var city in playerCities)
+            {
+                int dist = Math.Abs(unit.X - city.X) + Math.Abs(unit.Y - city.Y);
+                if (dist < closestDist)
                 {
-                    if (texturePath.Contains("_orig.webp"))
-                    {
-                        img = MakeBackgroundTransparentBFS(img, Colors.White);
-                    }
-                    tex = ImageTexture.CreateFromImage(img);
+                    closestDist = dist;
+                    closestCityId = city.Id;
                 }
             }
-            catch (Exception ex)
-            {
-                GD.Print($"[MilitaryAdvisorPanel] Warning: Could not load texture from file {texturePath}: {ex.Message}");
-            }
-        }
 
-        // Draw up to 20 icons, if more, add a + indicator or just clamp
-        int drawCount = Mathf.Min(count, 30);
-        for (int i = 0; i < drawCount; i++)
-        {
-            if (tex != null)
+            if (closestCityId != null && closestDist <= 3)
             {
-                var texRect = new TextureRect 
-                { 
-                    Texture = tex, 
-                    ExpandMode = TextureRect.ExpandModeEnum.FitWidth,
-                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                    CustomMinimumSize = new Vector2(24, 24)
-                };
-                spritesHBox.AddChild(texRect);
+                if (!cityUnitMap.ContainsKey(closestCityId))
+                    cityUnitMap[closestCityId] = new List<Unit>();
+                cityUnitMap[closestCityId].Add(unit);
             }
             else
             {
-                // Fallback emoji if no texture found
-                var fallback = new Label { Text = "♟️" };
-                spritesHBox.AddChild(fallback);
+                fieldUnits.Add(unit);
             }
         }
-        
-        if (count > 30)
+
+        // Show units per city
+        foreach (var city in playerCities.OrderBy(c => c.Name))
         {
-            var plusLabel = new Label { Text = "+" };
-            plusLabel.AddThemeColorOverride("font_color", Colors.Black);
-            spritesHBox.AddChild(plusLabel);
-        }
+            var units = cityUnitMap.ContainsKey(city.Id) ? cityUnitMap[city.Id] : new List<Unit>();
 
-        row.AddChild(spritesHBox);
-        return row;
-    }
+            var cityHeader = new PanelContainer();
+            var chStyle = new StyleBoxFlat { BgColor = new Color(0.75f, 0.7f, 0.6f), ContentMarginLeft = 10, ContentMarginTop = 4, ContentMarginBottom = 4 };
+            cityHeader.AddThemeStyleboxOverride("panel", chStyle);
+            var chHBox = new HBoxContainer();
+            var chLabel = new Label { Text = $"{city.Name} ({city.X},{city.Y})", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+            chLabel.AddThemeFontSizeOverride("font_size", 15);
+            chLabel.AddThemeColorOverride("font_color", new Color(0.15f, 0.1f, 0.05f));
+            var chCount = new Label { Text = $"{units.Count} units" };
+            chCount.AddThemeFontSizeOverride("font_size", 13);
+            chCount.AddThemeColorOverride("font_color", new Color(0.4f, 0.25f, 0.1f));
+            chHBox.AddChild(chLabel);
+            chHBox.AddChild(chCount);
+            cityHeader.AddChild(chHBox);
+            listVBox.AddChild(cityHeader);
 
-    private PanelContainer CreateStatBox(string title, string value, Color bgColor)
-    {
-        var panel = new PanelContainer { CustomMinimumSize = new Vector2(180, 0) };
-        var style = new StyleBoxFlat { BgColor = bgColor, BorderColor = new Color(0.7f, 0.7f, 0.7f), BorderWidthTop = 1, BorderWidthBottom = 1, BorderWidthLeft = 1, BorderWidthRight = 1 };
-        panel.AddThemeStyleboxOverride("panel", style);
-
-        var vbox = new VBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        var titleLabel = new Label { Text = title, HorizontalAlignment = HorizontalAlignment.Center };
-        titleLabel.AddThemeColorOverride("font_color", Colors.Black);
-        titleLabel.AddThemeFontSizeOverride("font_size", 14);
-        
-        var valLabel = new Label { Text = value, HorizontalAlignment = HorizontalAlignment.Center };
-        valLabel.AddThemeColorOverride("font_color", Colors.DarkBlue);
-        valLabel.AddThemeFontSizeOverride("font_size", 18);
-
-        vbox.AddChild(titleLabel);
-        vbox.AddChild(valLabel);
-        panel.AddChild(vbox);
-        return panel;
-    }
-
-    private static Image MakeBackgroundTransparentBFS(Image img, Color keyColor, float threshold = 0.08f)
-    {
-        img.Convert(Image.Format.Rgba8);
-        int width = img.GetWidth();
-        int height = img.GetHeight();
-        
-        bool[,] visited = new bool[width, height];
-        Queue<Vector2I> queue = new Queue<Vector2I>();
-        
-        // Add all edge pixels as starting points
-        for (int x = 0; x < width; x++)
-        {
-            queue.Enqueue(new Vector2I(x, 0));
-            queue.Enqueue(new Vector2I(x, height - 1));
-            visited[x, 0] = true;
-            visited[x, height - 1] = true;
-        }
-        for (int y = 1; y < height - 1; y++)
-        {
-            queue.Enqueue(new Vector2I(0, y));
-            queue.Enqueue(new Vector2I(width - 1, y));
-            visited[0, y] = true;
-            visited[width - 1, y] = true;
-        }
-        
-        while (queue.Count > 0)
-        {
-            Vector2I curr = queue.Dequeue();
-            Color pixel = img.GetPixel(curr.X, curr.Y);
-            
-            float diffR = Math.Abs(pixel.R - keyColor.R);
-            float diffG = Math.Abs(pixel.G - keyColor.G);
-            float diffB = Math.Abs(pixel.B - keyColor.B);
-            
-            if (diffR <= threshold && diffG <= threshold && diffB <= threshold)
+            if (units.Count == 0)
             {
-                // Make it transparent
-                img.SetPixel(curr.X, curr.Y, new Color(pixel.R, pixel.G, pixel.B, 0.0f));
-                
-                // Add neighbors
-                Vector2I[] neighbors = new Vector2I[]
+                var noUnits = new Label { Text = "    (no garrison)" };
+                noUnits.AddThemeFontSizeOverride("font_size", 12);
+                noUnits.AddThemeColorOverride("font_color", new Color(0.5f, 0.4f, 0.3f));
+                listVBox.AddChild(noUnits);
+            }
+            else
+            {
+                bool alt = false;
+                foreach (var unit in units.OrderBy(u => u.Type.ToString()))
                 {
-                    new Vector2I(curr.X + 1, curr.Y),
-                    new Vector2I(curr.X - 1, curr.Y),
-                    new Vector2I(curr.X, curr.Y + 1),
-                    new Vector2I(curr.X, curr.Y - 1)
-                };
-                
-                foreach (var n in neighbors)
-                {
-                    if (n.X >= 0 && n.X < width && n.Y >= 0 && n.Y < height)
-                    {
-                        if (!visited[n.X, n.Y])
-                        {
-                            visited[n.X, n.Y] = true;
-                            queue.Enqueue(n);
-                        }
-                    }
+                    listVBox.AddChild(CreateUnitDetailRow(unit, alt));
+                    alt = !alt;
                 }
             }
         }
-        
-        return img;
+
+        // Field units (not near any city)
+        if (fieldUnits.Count > 0)
+        {
+            var fieldHeader = new PanelContainer();
+            var fhStyle = new StyleBoxFlat { BgColor = new Color(0.7f, 0.65f, 0.55f), ContentMarginLeft = 10, ContentMarginTop = 4, ContentMarginBottom = 4 };
+            fieldHeader.AddThemeStyleboxOverride("panel", fhStyle);
+            var fhLabel = new Label { Text = $"In the Field ({fieldUnits.Count} units)" };
+            fhLabel.AddThemeFontSizeOverride("font_size", 15);
+            fhLabel.AddThemeColorOverride("font_color", new Color(0.3f, 0.15f, 0.05f));
+            fieldHeader.AddChild(fhLabel);
+            listVBox.AddChild(fieldHeader);
+
+            bool alt = false;
+            foreach (var unit in fieldUnits.OrderBy(u => u.Type.ToString()))
+            {
+                listVBox.AddChild(CreateUnitDetailRow(unit, alt));
+                alt = !alt;
+            }
+        }
+
+        scroll.AddChild(listVBox);
+        _contentContainer.AddChild(scroll);
+    }
+
+    private HBoxContainer CreateUnitDetailRow(Unit unit, bool altBg)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+        row.CustomMinimumSize = new Vector2(0, 28);
+
+        if (altBg)
+            row.Modulate = new Color(0.97f, 0.95f, 0.9f);
+
+        // Unit type name
+        var nameLabel = new Label { Text = unit.Type.ToString(), CustomMinimumSize = new Vector2(100, 0) };
+        nameLabel.AddThemeFontSizeOverride("font_size", 13);
+        nameLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.08f, 0.05f));
+        row.AddChild(nameLabel);
+
+        // ATK/DEF
+        var atkLabel = new Label { Text = $"A:{unit.AttackStrength}", CustomMinimumSize = new Vector2(40, 0) };
+        atkLabel.AddThemeFontSizeOverride("font_size", 12);
+        atkLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.2f, 0.1f));
+        row.AddChild(atkLabel);
+
+        var defLabel = new Label { Text = $"D:{unit.DefenseStrength}", CustomMinimumSize = new Vector2(40, 0) };
+        defLabel.AddThemeFontSizeOverride("font_size", 12);
+        defLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.3f, 0.6f));
+        row.AddChild(defLabel);
+
+        // HP Bar
+        var hpContainer = new HBoxContainer { CustomMinimumSize = new Vector2(100, 0) };
+        hpContainer.AddThemeConstantOverride("separation", 4);
+        var hpBar = new ProgressBar { CustomMinimumSize = new Vector2(60, 14), MinValue = 0, MaxValue = unit.MaxHealth, Value = unit.Health };
+        hpContainer.AddChild(hpBar);
+        var hpText = new Label { Text = $"{unit.Health}%" };
+        hpText.AddThemeFontSizeOverride("font_size", 11);
+        hpText.AddThemeColorOverride("font_color", unit.Health >= 70 ? new Color(0.1f, 0.5f, 0.1f) : unit.Health >= 40 ? new Color(0.6f, 0.5f, 0.1f) : new Color(0.7f, 0.1f, 0.1f));
+        hpContainer.AddChild(hpText);
+        row.AddChild(hpContainer);
+
+        // Movement
+        var moveLabel = new Label { Text = $"M:{unit.RemainingMovement:F0}/{unit.MaxMovement:F0}", CustomMinimumSize = new Vector2(60, 0) };
+        moveLabel.AddThemeFontSizeOverride("font_size", 11);
+        moveLabel.AddThemeColorOverride("font_color", new Color(0.3f, 0.3f, 0.3f));
+        row.AddChild(moveLabel);
+
+        // Position
+        var posLabel = new Label { Text = $"({unit.X},{unit.Y})", CustomMinimumSize = new Vector2(60, 0) };
+        posLabel.AddThemeFontSizeOverride("font_size", 11);
+        posLabel.AddThemeColorOverride("font_color", new Color(0.4f, 0.35f, 0.25f));
+        row.AddChild(posLabel);
+
+        // Status
+        string status = "Active";
+        Color statusColor = new Color(0.2f, 0.5f, 0.2f);
+        if (unit.IsFortified) { status = "Fortified"; statusColor = new Color(0.2f, 0.3f, 0.6f); }
+        else if (unit.IsSleeping) { status = "Sleeping"; statusColor = new Color(0.4f, 0.4f, 0.4f); }
+        else if (unit.IsWorkerBuilding()) { status = "Building"; statusColor = new Color(0.5f, 0.4f, 0.1f); }
+        else if (unit.RemainingMovement <= 0) { status = "Exhausted"; statusColor = new Color(0.5f, 0.3f, 0.3f); }
+
+        var statusLabel = new Label { Text = status, CustomMinimumSize = new Vector2(80, 0) };
+        statusLabel.AddThemeFontSizeOverride("font_size", 11);
+        statusLabel.AddThemeColorOverride("font_color", statusColor);
+        row.AddChild(statusLabel);
+
+        return row;
+    }
+
+    private Button CreateToggleButton(string text, bool active)
+    {
+        var btn = new Button { Text = text, CustomMinimumSize = new Vector2(140, 30) };
+        btn.AddThemeFontSizeOverride("font_size", 13);
+        var style = active
+            ? new StyleBoxFlat { BgColor = new Color(0.55f, 0.25f, 0.15f), CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 }
+            : new StyleBoxFlat { BgColor = new Color(0.3f, 0.25f, 0.2f), CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 };
+        btn.AddThemeStyleboxOverride("normal", style);
+        return btn;
+    }
+
+    private string GenerateMilitaryAdvice(int playerUnits, int aiUnits, int military)
+    {
+        if (playerUnits == 0)
+            return "We have no military forces! Build Warriors immediately to defend our cities!";
+        if (_sim.IsAtWarWithAi && playerUnits < aiUnits)
+            return $"We are at WAR and outnumbered! The enemy has approximately {aiUnits} units. Build more troops immediately or seek peace!";
+        if (_sim.IsAtWarWithAi && playerUnits >= aiUnits)
+            return "We are at war but our forces are strong. Press the attack or fortify our borders!";
+        if (playerUnits > aiUnits * 1.5f)
+            return "Our military dominance is overwhelming. We could crush our rivals if we wish, or maintain this superiority as a deterrent.";
+        if (playerUnits > aiUnits)
+            return "We have a military advantage. Our forces are well-positioned to defend the empire.";
+        if (playerUnits < aiUnits * 0.5f)
+            return "We are dangerously outnumbered! The enemy could attack at any time. Prioritize military production immediately!";
+        if (military == 0)
+            return "We have no combat units! Our empire is defenseless. Build Warriors or Archers to protect our cities.";
+        return "Our military is adequate. Consider building more units if expansion or war is planned.";
+    }
+
+    private void AddStatLine(VBoxContainer parent, string label, string value, Color valueColor)
+    {
+        var hbox = new HBoxContainer();
+        var lbl = new Label { Text = label, SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        lbl.AddThemeFontSizeOverride("font_size", 12);
+        lbl.AddThemeColorOverride("font_color", new Color(0.3f, 0.3f, 0.3f));
+        var val = new Label { Text = value };
+        val.AddThemeFontSizeOverride("font_size", 13);
+        val.AddThemeColorOverride("font_color", valueColor);
+        hbox.AddChild(lbl);
+        hbox.AddChild(val);
+        parent.AddChild(hbox);
     }
 }
 

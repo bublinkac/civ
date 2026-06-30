@@ -43,18 +43,33 @@ public class Civilization
     }
 }
 
+/// <summary>
+/// Civ3 Golden Age:
+/// - Duration: 20 turns
+/// - Effect: Every worked tile producing ≥1 shield gets +1 shield; every tile producing ≥1 commerce gets +1 commerce
+/// - Can only happen ONCE per civilization per game
+/// - Triggers: (1) Win combat with Unique Unit for first time, OR (2) Build a Wonder matching both civ traits
+/// </summary>
 public class GoldenAge
 {
     public bool IsActive { get; set; } = false;
     public int TurnsRemaining { get; set; } = 0;
-    public const int MaxDuration = 20;
+    /// <summary>Once triggered, cannot trigger again.</summary>
+    public bool HasBeenUsed { get; set; } = false;
+    public const int Duration = 20;
 
-    public void Trigger()
+    /// <summary>
+    /// Attempt to trigger a Golden Age. Returns true if successfully triggered.
+    /// Will fail if already used or currently active.
+    /// </summary>
+    public bool Trigger(string factionName, string reason)
     {
-        if (IsActive) return;
+        if (HasBeenUsed || IsActive) return false;
         IsActive = true;
-        TurnsRemaining = MaxDuration;
-        System.Console.WriteLine("[GOLDEN AGE] A Golden Age has begun! Production and commerce output are boosted across all tiles!");
+        HasBeenUsed = true;
+        TurnsRemaining = Duration;
+        System.Console.WriteLine($"[GOLDEN AGE] {factionName} enters a Golden Age! ({reason}) +1 shield and +1 commerce on all productive tiles for {Duration} turns!");
+        return true;
     }
 
     public void ProcessTurn()

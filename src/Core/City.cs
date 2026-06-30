@@ -124,6 +124,8 @@ public class City
     /// <summary>Culture generated per turn (base 1 + building/wonder bonuses).</summary>
     public int CultureOutput { get; set; } = 1;
     public bool IsInDisorder { get; set; } = false;
+    /// <summary>Consecutive turns this city has been in civil disorder.</summary>
+    public int DisorderTurns { get; set; } = 0;
     public int HappyCitizens { get; set; } = 0;
     public int ContentCitizens { get; set; } = 1;
     public int UnhappyCitizens { get; set; } = 0;
@@ -192,86 +194,158 @@ public class City
         return culturePerTurn;
     }
 
+    /// <summary>
+    /// Civ3-authentic citizen mood calculation.
+    /// Order of effects:
+    ///   1. Base population distribution (content vs unhappy based on difficulty)
+    ///   2. War weariness (Republic/Democracy only)
+    ///   3. Military police (government-dependent limit)
+    ///   4. Buildings (Temple, Colosseum, Cathedral produce content faces)
+    ///   5. Luxuries (connected luxury resources produce happy faces; Marketplace amplifies)
+    /// 
+    /// Content faces: make unhappy -> content
+    /// Happy faces: make content -> happy (or unhappy -> content if no content available)
+    /// </summary>
     public void UpdateCitizenMood(GameSimulation sim, DifficultySettings? difficulty = null)
     {
         int pop = Population;
         if (pop <= 0) return;
 
-        // Base content citizens depending on difficulty (Regent = 2 base content citizens)
+        // ═══════════════════════════════════════
+        // STEP 0: Base distribution
+        // ═══════════════════════════════════════
         int baseContent = difficulty?.BaseContentCitizens ?? 2;
         int baseUnhappy = difficulty?.BaseUnhappyCitizens ?? 0;
-        
+
         int happy = 0;
         int content = Math.Min(pop, baseContent);
         int unhappy = Math.Max(0, pop - baseContent) + baseUnhappy;
-        // Ensure total doesn't exceed population
         if (content + unhappy > pop)
-        {
             unhappy = Math.Max(0, pop - content);
-        }
 
-        // 1. Military Police (MP) effect (up to 2 stationed warriors/archers convert unhappy to content)
-        int mpCount = sim.Units.Count(u => u.X == X && u.Y == Y && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
-        int mpEffect = Math.Min(2, mpCount);
-        if (unhappy > 0 && mpEffect > 0)
+        // ═══════════════════════════════════════
+        // STEP 1: War Weariness (adds unhappy citizens)
+        // Only affects Republic and Democracy
+        // ═══════════════════════════════════════
+        int warWearinessUnhappy = sim.GetWarWearinessUnhappiness(this);
+        if (warWearinessUnhappy > 0)
         {
-            int toConvert = Math.Min(unhappy, mpEffect);
-            unhappy -= toConvert;
-            content += toConvert;
+            // War weariness converts content -> unhappy, then happy -> unhappy
+            int toConvert = Math.Min(content, warWearinessUnhappy);
+            content -= toConvert;
+            unhappy += toConvert;
+            warWearinessUnhappy -= toConvert;
+
+            if (warWearinessUnhappy > 0)
+            {
+                int fromHappy = Math.Min(happy, warWearinessUnhappy);
+                happy -= fromHappy;
+                unhappy += fromHappy;
+            }
         }
 
-        // 2. Buildings effect
-        int happinessBuildings = 0;
+        // ═══════════════════════════════════════
+        // STEP 2: Military Police (content faces)
+        // Government determines max MP units effective
+        // ═══════════════════════════════════════
+        var govType = Faction == Faction.Player ? sim.PlayerGovernment : sim.AiGovernment;
+        var gov = Government.Get(govType);
+        int maxMP = gov.MaxMilitaryPolice;
+        if (maxMP > 0)
+        {
+            int mpCount = sim.Units.Count(u => u.X == X && u.Y == Y && u.Faction == Faction
+                && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
+            int mpEffect = Math.Min(maxMP, mpCount);
+            if (unhappy > 0 && mpEffect > 0)
+            {
+                int toConvert = Math.Min(unhappy, mpEffect);
+                unhappy -= toConvert;
+                content += toConvert;
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // STEP 3: Buildings (produce content faces)
+        // Temple: 1 (Religious trait: 2)
+        // Colosseum: 2
+        // Cathedral: 3 (Religious trait: 4)
+        // ═══════════════════════════════════════
+        int contentFaces = 0;
         int templeBonus = HasTrait(CivTrait.Religious) ? 2 : 1;
         int cathedralBonus = HasTrait(CivTrait.Religious) ? 4 : 3;
 
-        if (Buildings.Any(b => b.Id == "temple")) happinessBuildings += templeBonus;
-        if (Buildings.Any(b => b.Id == "colosseum")) happinessBuildings += 2;
-        if (Buildings.Any(b => b.Id == "cathedral")) happinessBuildings += cathedralBonus;
+        if (Buildings.Any(b => b.Id == "temple")) contentFaces += templeBonus;
+        if (Buildings.Any(b => b.Id == "colosseum")) contentFaces += 2;
+        if (Buildings.Any(b => b.Id == "cathedral")) contentFaces += cathedralBonus;
 
-        if (unhappy > 0 && happinessBuildings > 0)
+        // Content faces: convert unhappy -> content
+        if (unhappy > 0 && contentFaces > 0)
         {
-            int toConvert = Math.Min(unhappy, happinessBuildings);
+            int toConvert = Math.Min(unhappy, contentFaces);
             unhappy -= toConvert;
             content += toConvert;
-            happinessBuildings -= toConvert;
+            contentFaces -= toConvert;
         }
-        if (content > 0 && happinessBuildings > 0)
+        // Extra content faces make content -> happy
+        if (content > 0 && contentFaces > 0)
         {
-            int toConvert = Math.Min(content, happinessBuildings);
+            int toConvert = Math.Min(content, contentFaces);
             content -= toConvert;
             happy += toConvert;
         }
 
-        // 3. Luxuries effect (connected luxuries Wine, Gems, Fur, Spices)
-        int luxuriesCount = 0;
-        bool hasLuxuries = Buildings.Any(b => b.Id == "marketplace") || Population > 2;
-        if (hasLuxuries)
+        // ═══════════════════════════════════════
+        // STEP 4: Luxuries (produce happy faces)
+        // Civ3 mechanic: Each connected luxury = 1 happy face.
+        // With Marketplace: 1-2 luxuries = 1 each, 3-4 = 2 each, 5-6 = 3 each, 7-8 = 4 each
+        // ═══════════════════════════════════════
+        var connectedLuxuries = sim.GetCityConnectedLuxuries(this);
+        int luxCount = connectedLuxuries.Count;
+        int happyFaces = 0;
+
+        if (luxCount > 0)
         {
-            luxuriesCount = 2;
-            if (Buildings.Any(b => b.Id == "marketplace")) luxuriesCount = 4;
+            bool hasMarketplace = Buildings.Any(b => b.Id == "marketplace");
+            if (hasMarketplace)
+            {
+                // Marketplace bonus: luxuries 1-2 give 1 face each, 3-4 give 2, 5-6 give 3, 7-8 give 4
+                for (int i = 1; i <= luxCount; i++)
+                {
+                    int tier = (i + 1) / 2; // 1,1 -> 1; 2,2 -> 1; 3,3 -> 2; ...
+                    happyFaces += tier;
+                }
+            }
+            else
+            {
+                // Without marketplace: each luxury = 1 happy face
+                happyFaces = luxCount;
+            }
         }
 
-        if (unhappy > 0 && luxuriesCount > 0)
+        // Happy faces: convert unhappy -> content first, then content -> happy
+        if (unhappy > 0 && happyFaces > 0)
         {
-            int toConvert = Math.Min(unhappy, luxuriesCount);
+            int toConvert = Math.Min(unhappy, happyFaces);
             unhappy -= toConvert;
             content += toConvert;
-            luxuriesCount -= toConvert;
+            happyFaces -= toConvert;
         }
-        if (content > 0 && luxuriesCount > 0)
+        if (content > 0 && happyFaces > 0)
         {
-            int toConvert = Math.Min(content, luxuriesCount);
+            int toConvert = Math.Min(content, happyFaces);
             content -= toConvert;
             happy += toConvert;
         }
 
-        HappyCitizens = happy;
-        ContentCitizens = content;
-        UnhappyCitizens = unhappy;
+        // ═══════════════════════════════════════
+        // FINAL: Assign results
+        // ═══════════════════════════════════════
+        HappyCitizens = Math.Max(0, happy);
+        ContentCitizens = Math.Max(0, content);
+        UnhappyCitizens = Math.Max(0, unhappy);
 
-        // Civil Disorder if unhappy > happy and population is greater than 1
-        IsInDisorder = unhappy > happy && pop > 1;
+        // Civil Disorder: unhappy > happy and population > 1
+        IsInDisorder = UnhappyCitizens > HappyCitizens && pop > 1;
     }
 
     public City(string id, string name, int x, int y, int foundedYear, Faction faction = Faction.Player, string? civilizationId = null)

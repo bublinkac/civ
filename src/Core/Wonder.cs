@@ -7,11 +7,22 @@ public abstract class Wonder : Building
 {
     public override int MaintenanceCost => 0;
     public virtual bool IsNationalWonder => false;
+    /// <summary>
+    /// Civ3 trait associations for Golden Age trigger.
+    /// A wonder matching BOTH traits of a civ triggers its Golden Age when built.
+    /// </summary>
+    public virtual CivTrait[] AssociatedTraits => Array.Empty<CivTrait>();
     
     public override void OnCompleted(City city, GameSimulation sim)
     {
         sim.ClaimWonder(this, city.Faction);
         System.Console.WriteLine($"[Wonder] The {Name} has been completed in {city.Name}!");
+
+        // Check Golden Age trigger: Wonder matches BOTH civ traits
+        if (!IsNationalWonder)
+        {
+            sim.CheckWonderGoldenAgeTrigger(this, city.Faction);
+        }
     }
     
     public virtual void OnBuiltGlobally(GameSimulation sim) { }
@@ -30,37 +41,49 @@ public static class WonderRegistry
     {
         // Ancient Era Wonders
         Register(new GenericWonder("pyramids", "Pyramids", 200, "masonry",
-            "Each city gets granary effect automatically. City growth rate +1."));
+            "Each city gets granary effect automatically. City growth rate +1.",
+            traits: new[] { CivTrait.Agricultural, CivTrait.Industrious }));
         Register(new GenericWonder("hanging_gardens", "Hanging Gardens", 200, "monotheism",
-            "Makes unhappy citizens content. +1 culture in all cities."));
+            "Makes unhappy citizens content. +1 culture in all cities.",
+            traits: new[] { CivTrait.Agricultural, CivTrait.Religious }));
         Register(new GenericWonder("colossus", "Colossus", 200, "bronze_working",
-            "Makes coastal tiles near city produce 2 food. +2 culture."));
+            "Makes coastal tiles near city produce 2 food. +2 culture.",
+            traits: new[] { CivTrait.Commercial, CivTrait.Seafaring }));
         Register(new GenericWonder("temple_of_artemis", "Temple of Artemis", 300, "polytheism",
             "Makes 2 citizens happy. +2 culture."));
         Register(new GenericWonder("great_wall", "Great Wall", 300, "construction",
-            "Defense bonus for all cities. +2 culture."));
+            "Defense bonus for all cities. +2 culture.",
+            traits: new[] { CivTrait.Militaristic, CivTrait.Expansionist }));
         Register(new GenericWonder("statue_of_zeus", "Statue of Zeus", 200, "mathematics",
-            "Increases city growth rate. +2 culture. Eliminates war weariness."));
+            "Increases city growth rate. +2 culture. Eliminates war weariness.",
+            traits: new[] { CivTrait.Militaristic, CivTrait.Religious }));
         Register(new GenericWonder("oracle", "Oracle", 300, "mysticism",
-            "Temples have +2 additional happy faces. +3 culture."));
+            "Temples have +2 additional happy faces. +3 culture.",
+            traits: new[] { CivTrait.Religious, CivTrait.Scientific }));
         Register(new GenericWonder("louvre", "Louvre", 800, "free_artistry",
             "Automatically obsolete all improvements. Doubles culture."));
 
         // Medieval Era Wonders
         Register(new GenericWonder("knights_hall", "Knights Hall", 300, "chivalry",
-            "All units built here as veterans. +2 culture."));
+            "All units built here as veterans. +2 culture.",
+            traits: new[] { CivTrait.Militaristic, CivTrait.Industrious }));
         Register(new GenericWonder("sovereign_bath", "Sovereign Bath", 400, "theology",
             "Makes 2 citizens happy. +2 culture. Eliminates fear from civil wars."));
         Register(new GenericWonder("leonardo_workshop", "Leonardo's Workshop", 400, "invention",
-            "All military units heal in 1 turn. +1 culture. Obsolete obsolete units."));
+            "All military units heal in 1 turn. +1 culture. Obsolete obsolete units.",
+            traits: new[] { CivTrait.Scientific, CivTrait.Industrious }));
         Register(new GenericWonder("shakespeares_theatre", "Shakespeare's Theatre", 300, "free_artistry",
-            "Makes 2 citizens happy. +2 culture."));
+            "Makes 2 citizens happy. +2 culture.",
+            traits: new[] { CivTrait.Commercial, CivTrait.Religious }));
         Register(new GenericWonder("sun_tzu_war_academy", "Sun Tzu's War Academy", 400, "feudalism",
-            "All units built here as veterans. +2 culture."));
+            "All units built here as veterans. +2 culture.",
+            traits: new[] { CivTrait.Militaristic, CivTrait.Scientific }));
         Register(new GenericWonder("cure_for_cancer", "Cure for Cancer", 600, "medicine",
-            "Makes 2 citizens happy in every city. +2 culture."));
+            "Makes 2 citizens happy in every city. +2 culture.",
+            traits: new[] { CivTrait.Agricultural, CivTrait.Scientific }));
         Register(new GenericWonder("sistine_chapel", "Sistine Chapel", 500, "theology",
-            "Doubles wonder production speed. +3 culture."));
+            "Doubles wonder production speed. +3 culture.",
+            traits: new[] { CivTrait.Religious, CivTrait.Industrious }));
         Register(new GenericWonder("taj_mahal", "Taj Mahal", 500, "nationalism",
             "Makes 2 citizens happy. +2 culture. Obsolete if wonder never obsolete."));
 
@@ -68,11 +91,14 @@ public static class WonderRegistry
         Register(new GenericWonder("astrolabe", "Astrolabe", 400, "astronomy",
             "Doubles science output in city. +2 culture."));
         Register(new GenericWonder("hermitage", "Hermitage", 500, "nationalism",
-            "Makes 2 citizens happy. +2 culture. Increases cultural expansion."));
+            "Makes 2 citizens happy. +2 culture. Increases cultural expansion.",
+            traits: new[] { CivTrait.Expansionist, CivTrait.Religious }));
         Register(new GenericWonder("smith_mansion", "Smith's Mansion", 400, "economics",
-            "Bank generates 5 gold. Stock Exchange generates 10 gold. +2 culture."));
+            "Bank generates 5 gold. Stock Exchange generates 10 gold. +2 culture.",
+            traits: new[] { CivTrait.Commercial, CivTrait.Scientific }));
         Register(new GenericWonder("train_station", "Train Station", 600, "steam_power",
-            "All cities connected by railroad. +1 science. +1 gold. +2 culture."));
+            "All cities connected by railroad. +1 science. +1 gold. +2 culture.",
+            traits: new[] { CivTrait.Industrious, CivTrait.Commercial }));
         Register(new GenericWonder("united_nations", "United Nations", 600, "the_corporation",
             "Diplomatic victory possible. +3 culture."));
 
@@ -80,9 +106,11 @@ public static class WonderRegistry
         Register(new GenericWonder("manhattan_project", "Manhattan Project", 800, "fission",
             "Nuclear weapons available to all. +2 culture."));
         Register(new GenericWonder("internet", "Internet", 800, "computers",
-            "Doubles science output in all cities. +2 culture. Obsolete immediately."));
+            "Doubles science output in all cities. +2 culture. Obsolete immediately.",
+            traits: new[] { CivTrait.Scientific, CivTrait.Commercial }));
         Register(new GenericWonder("longevity_vaccine", "Longevity Vaccine", 600, "medicine",
-            "Makes 2 citizens happy everywhere. +1 culture."));
+            "Makes 2 citizens happy everywhere. +1 culture.",
+            traits: new[] { CivTrait.Agricultural, CivTrait.Religious }));
         Register(new GenericWonder("mars_colony", "Mars Colony", 800, "space_flight",
             "+1 happy face. +2 food in capital. Eliminates overcrowding. +3 culture."));
         Register(new GenericWonder("world_bank", "World Bank", 1000, "the_corporation",
@@ -128,9 +156,11 @@ public class GenericWonder : Wonder
     public override int DefenseBonus { get; }
     public override float CommerceMultiplier { get; }
     public string Description { get; }
+    public override CivTrait[] AssociatedTraits { get; }
 
     public GenericWonder(string id, string name, int cost, string? requiredTech, string description, 
-        string? requiredResource = null, int defenseBonus = 0, float commerceMultiplier = 1.0f)
+        string? requiredResource = null, int defenseBonus = 0, float commerceMultiplier = 1.0f,
+        CivTrait[]? traits = null)
     {
         Id = id;
         Name = name;
@@ -140,6 +170,7 @@ public class GenericWonder : Wonder
         Description = description;
         DefenseBonus = defenseBonus;
         CommerceMultiplier = commerceMultiplier;
+        AssociatedTraits = traits ?? Array.Empty<CivTrait>();
     }
 }
 

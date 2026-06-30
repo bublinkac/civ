@@ -27,11 +27,34 @@ public class GameSimulation
         public GameEndState EndState { get; private set; } = GameEndState.None;
         public const int MaxTurnLimit = 50;
 
+        // Histograph (per-turn stats tracking for graph)
+        public HistographData Histograph { get; } = new();
+
+        // Government
+        public GovernmentType PlayerGovernment { get; set; } = GovernmentType.Despotism;
+        public GovernmentType AiGovernment { get; set; } = GovernmentType.Despotism;
+        public int AnarchyTurnsRemaining { get; set; } = 0;
+        /// <summary>Government that will take effect after anarchy ends.</summary>
+        public GovernmentType? PendingGovernment { get; set; } = null;
+        /// <summary>True if the player is currently in anarchy (revolution in progress).</summary>
+        public bool IsInAnarchy => AnarchyTurnsRemaining > 0;
+
+        // War Weariness (Civ3 authentic: tracked per enemy civ via War Weariness Points)
+        // WWP thresholds: 0-30 = no effect, 31-60 = level 1, 61-90 = level 2, 91-120 = level 3, 121+ = level 4
+        public int WarWearinessPoints { get; set; } = 0;
+        /// <summary>Turn war was declared. -1 = never at war.</summary>
+        public int WarStartTurn { get; set; } = -1;
+        /// <summary>True if AI declared war on us (defensive war = delayed WW).</summary>
+        public bool IsDefensiveWar { get; set; } = false;
+        /// <summary>Turns since peace was signed (for WW decay).</summary>
+        public int PeaceTurns { get; set; } = 0;
+
         // Economy
         public int PlayerTreasury { get; set; } = 0;
         public int PlayerTaxRate { get; set; } = 50; // 0-100 percentage
         public int LastTurnIncome { get; private set; } = 0;
         public int LastTurnMaintenance { get; private set; } = 0;
+        public int LastTurnUnitSupport { get; private set; } = 0;
         public int LastTurnScience { get; private set; } = 0;
         public int LastTurnNetGold { get; private set; } = 0;
 
@@ -63,6 +86,10 @@ public class GameSimulation
     public HashSet<string> AiResearchedTechs { get; } = new();
     public string? AiCurrentResearchId { get; set; }
     public int AiScienceProgress { get; set; }
+
+    // Golden Age (Civ3: one per civ, 20 turns, +1 shield/commerce on productive tiles)
+    public GoldenAge PlayerGoldenAge { get; } = new();
+    public GoldenAge AiGoldenAge { get; } = new();
 
     // Space Race tracking – parts built by the player
     public HashSet<ProductionProject> BuiltSpaceshipParts { get; } = new();
@@ -732,12 +759,14 @@ public class GameSimulation
         if (unit.Faction == Faction.Player && city.Faction == Faction.AiRival && !IsAtWarWithAi)
         {
             IsAtWarWithAi = true;
+            OnWarDeclared(isDefensive: false); // Player initiated war
             Console.WriteLine($"[Diplomacy] WAR declared! Player unit {unit.Type} intruded into {city.Name}'s territory at ({targetX}, {targetY})!");
         }
         // If an AI unit enters player territory and we are at peace
         else if (unit.Faction == Faction.AiRival && city.Faction == Faction.Player && !IsAtWarWithAi)
         {
             IsAtWarWithAi = true;
+            OnWarDeclared(isDefensive: true); // AI attacked us - defensive war
             Console.WriteLine($"[Diplomacy] WAR declared! AI unit {unit.Type} intruded into {city.Name}'s territory at ({targetX}, {targetY})!");
         }
     }
@@ -835,6 +864,10 @@ public class GameSimulation
             Console.WriteLine($"[Combat] {defender.Type} has been destroyed!");
             Units.Remove(defender);
 
+            // War weariness: +2 when losing a unit
+            if (defender.Faction == Faction.Player)
+                AddWarWearinessPoints(2);
+
             // Attacker advances onto the defender's tile upon victory and is registered as victorious
             if (!attackerDied)
             {
@@ -844,6 +877,9 @@ public class GameSimulation
                 Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
                 
                 FactionsWithVictoriousUnit.Add(attacker.Faction);
+
+                // Golden Age trigger: first UU combat victory
+                CheckUniqueUnitGoldenAgeTrigger(attacker);
             }
         }
 
@@ -851,11 +887,18 @@ public class GameSimulation
         {
             Console.WriteLine($"[Combat] {attacker.Type} has been destroyed in battle!");
             Units.Remove(attacker);
+
+            // War weariness: +2 when losing a unit
+            if (attacker.Faction == Faction.Player)
+                AddWarWearinessPoints(2);
             
             // Defender wins and is registered as victorious
             if (!defenderDied)
             {
                 FactionsWithVictoriousUnit.Add(defender.Faction);
+
+                // Golden Age trigger: first UU combat victory
+                CheckUniqueUnitGoldenAgeTrigger(defender);
             }
         }
 
@@ -890,20 +933,27 @@ public class GameSimulation
         var capital = Cities.FirstOrDefault(c => c.Faction == city.Faction && c.IsCapital);
         if (capital != null)
         {
-            int dx = Math.Abs(city.X - capital.X);
-            int dy = Math.Abs(city.Y - capital.Y);
-            minDist = Math.Min(minDist, Math.Max(dx, dy)); // Chebyshev
+            minDist = Math.Min(minDist, Civ3Distance(city, capital));
         }
 
         // Distance to Forbidden Palace cities (secondary capitals for corruption)
         foreach (var fpCity in Cities.Where(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "forbidden_palace")))
         {
-            int dx = Math.Abs(city.X - fpCity.X);
-            int dy = Math.Abs(city.Y - fpCity.Y);
-            minDist = Math.Min(minDist, Math.Max(dx, dy));
+            minDist = Math.Min(minDist, Civ3Distance(city, fpCity));
         }
 
         return minDist == int.MaxValue ? 0 : minDist;
+    }
+
+    /// <summary>
+    /// Civ3 distance formula: d = max(dx,dy) + min(dx,dy)/2
+    /// This gives a value between Manhattan and Chebyshev distance.
+    /// </summary>
+    private static int Civ3Distance(City a, City b)
+    {
+        int dx = Math.Abs(a.X - b.X);
+        int dy = Math.Abs(a.Y - b.Y);
+        return Math.Max(dx, dy) + Math.Min(dx, dy) / 2;
     }
 
     public bool HasFreshWaterAccess(City city)
@@ -923,6 +973,47 @@ public class GameSimulation
                         return true;
                     }
                 }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Civ3 irrigation chain: A Farm can only be built on a tile adjacent to:
+    /// 1. Fresh water (coast, floodplains, river), OR
+    /// 2. A city (cities act as irrigation sources), OR
+    /// 3. Another tile that already has a Farm (irrigation chain)
+    /// After discovering Electricity, irrigation can be built anywhere.
+    /// </summary>
+    public bool HasIrrigationAccess(int x, int y)
+    {
+        // After Electricity: irrigate anywhere without fresh water requirement
+        if (Research.IsResearched("electricity"))
+            return true;
+
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue; // Skip self
+                int nx = x + dx;
+                int ny = y + dy;
+                if (!Map.IsInBounds(nx, ny)) continue;
+
+                var adj = Map.GetTile(nx, ny);
+                if (adj == null) continue;
+
+                // Fresh water source: coast, floodplains
+                if (adj.Terrain.Id == "coast" || adj.Terrain.Id == "floodplains")
+                    return true;
+
+                // City acts as irrigation source
+                if (Cities.Any(c => c.X == nx && c.Y == ny))
+                    return true;
+
+                // Irrigation chain: adjacent tile has a Farm
+                if (adj.Improvement is Farm)
+                    return true;
             }
         }
         return false;
@@ -1461,6 +1552,29 @@ public class GameSimulation
         // 3.6 Process Volcanic Eruptions (0.35% chance per turn per volcano)
         VolcanoSystem.ProcessEruptions(this);
 
+        // 3.7 Process War Weariness (Civ3 mechanic)
+        ProcessWarWeariness();
+
+        // 3.8 Process Anarchy countdown — install pending government when anarchy ends
+        if (AnarchyTurnsRemaining > 0)
+        {
+            AnarchyTurnsRemaining--;
+            if (AnarchyTurnsRemaining <= 0 && PendingGovernment.HasValue)
+            {
+                PlayerGovernment = PendingGovernment.Value;
+                var newGov = Government.Get(PlayerGovernment);
+                Console.WriteLine($"[Government] Anarchy has ended! Your civilization is now a {newGov.Name}.");
+                PendingGovernment = null;
+            }
+        }
+
+        // 3.9 Process Golden Age countdown
+        PlayerGoldenAge.ProcessTurn();
+        AiGoldenAge.ProcessTurn();
+
+        // 3.10 Record Histograph data for this turn
+        Histograph.RecordTurn(this);
+
         TurnNumber++;
         foreach (var unit in Units)
         {
@@ -1473,6 +1587,309 @@ public class GameSimulation
 
         // 4. Check for game end conditions
         CheckGameEndConditions();
+    }
+
+    /// <summary>
+    /// Civ3 War Weariness calculation:
+    /// - +1 WWP per turn with units in enemy territory
+    /// - +2 WWP per unit lost (handled in combat code)
+    /// - Defensive war starts at -30 WWP (effectively delayed)
+    /// - In peace: decay 1/20 of current WWP per turn (rounded up)
+    /// - Police Station reduces EFFECT by 25% (not the points)
+    /// </summary>
+    private void ProcessWarWeariness()
+    {
+        var gov = Government.Get(PlayerGovernment);
+
+        if (IsAtWarWithAi)
+        {
+            PeaceTurns = 0;
+
+            // +1 WWP if player has any unit in AI territory
+            bool hasUnitsInEnemyTerritory = Units
+                .Where(u => u.Faction == Faction.Player)
+                .Any(u =>
+                {
+                    var tile = Map.GetTile(u.X, u.Y);
+                    if (tile?.OwnerCityId == null) return false;
+                    var ownerCity = Cities.FirstOrDefault(c => c.Id == tile.OwnerCityId);
+                    return ownerCity != null && ownerCity.Faction == Faction.AiRival;
+                });
+
+            if (hasUnitsInEnemyTerritory)
+                WarWearinessPoints++;
+
+            // If no enemy in our territory and no units in enemy territory, -1 WWP (minimum 0)
+            bool enemyInOurTerritory = Units
+                .Where(u => u.Faction == Faction.AiRival)
+                .Any(u =>
+                {
+                    var tile = Map.GetTile(u.X, u.Y);
+                    if (tile?.OwnerCityId == null) return false;
+                    var ownerCity = Cities.FirstOrDefault(c => c.Id == tile.OwnerCityId);
+                    return ownerCity != null && ownerCity.Faction == Faction.Player;
+                });
+
+            if (!hasUnitsInEnemyTerritory && !enemyInOurTerritory && GetWarWearinessLevel() >= 1)
+                WarWearinessPoints = Math.Max(0, WarWearinessPoints - 1);
+        }
+        else
+        {
+            // Peace: decay 1/20 of current WWP per turn (rounded up)
+            if (WarWearinessPoints > 0)
+            {
+                PeaceTurns++;
+                int decay = Math.Max(1, (int)Math.Ceiling(WarWearinessPoints / 20.0));
+                WarWearinessPoints = Math.Max(0, WarWearinessPoints - decay);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get war weariness level (0-4) based on accumulated WWP.
+    /// </summary>
+    public int GetWarWearinessLevel()
+    {
+        if (WarWearinessPoints <= 0) return 0;
+        if (WarWearinessPoints <= 30) return 0;
+        if (WarWearinessPoints <= 60) return 1;
+        if (WarWearinessPoints <= 90) return 2;
+        if (WarWearinessPoints <= 120) return 3;
+        return 4;
+    }
+
+    /// <summary>
+    /// Calculate number of unhappy citizens caused by war weariness in a city.
+    /// Depends on government type and WWP level.
+    /// Republic: Level 1=25%, 2=50%, 3=50%, 4=100%
+    /// Democracy: Level 1=50%, 2=100%, 3=REVOLT
+    /// Police Station reduces by 25%.
+    /// </summary>
+    public int GetWarWearinessUnhappiness(City city)
+    {
+        var govType = city.Faction == Faction.Player ? PlayerGovernment : AiGovernment;
+        var gov = Government.Get(govType);
+        if (!gov.HasWarWeariness || !IsAtWarWithAi) return 0;
+
+        int level = GetWarWearinessLevel();
+        if (level <= 0) return 0;
+
+        float unhappyPercent = 0f;
+        if (gov.WarWearinessSeverity == 1) // Republic
+        {
+            unhappyPercent = level switch
+            {
+                1 => 0.25f,
+                2 => 0.50f,
+                3 => 0.50f,
+                _ => 1.00f
+            };
+        }
+        else if (gov.WarWearinessSeverity == 2) // Democracy
+        {
+            unhappyPercent = level switch
+            {
+                1 => 0.50f,
+                2 => 1.00f,
+                _ => 1.00f // Level 3+ = revolt/anarchy (handled elsewhere)
+            };
+        }
+
+        int unhappy = (int)(city.Population * unhappyPercent);
+
+        // Police Station reduces war weariness effect by 25%
+        if (city.Buildings.Any(b => b.Id == "police_station"))
+            unhappy = (int)(unhappy * 0.75f);
+
+        return unhappy;
+    }
+
+    /// <summary>
+    /// Add war weariness points (e.g. +2 when losing a unit, +15 when city razed).
+    /// Call from combat resolution code.
+    /// </summary>
+    public void AddWarWearinessPoints(int points)
+    {
+        if (IsAtWarWithAi)
+            WarWearinessPoints += points;
+    }
+
+    /// <summary>
+    /// Called when war is declared. Sets up initial WWP state.
+    /// If defensive (AI attacked us), we get -30 initial offset.
+    /// </summary>
+    public void OnWarDeclared(bool isDefensive)
+    {
+        WarStartTurn = TurnNumber;
+        IsDefensiveWar = isDefensive;
+        PeaceTurns = 0;
+        if (isDefensive)
+            WarWearinessPoints = Math.Max(WarWearinessPoints - 30, -30);
+    }
+
+    /// <summary>
+    /// Called when peace is signed.
+    /// </summary>
+    public void OnPeaceSigned()
+    {
+        IsAtWarWithAi = false;
+        PeaceTurns = 0;
+    }
+
+    /// <summary>
+    /// Check if the player can start a revolution to change government.
+    /// Cannot change during anarchy or to the same government.
+    /// </summary>
+    public bool CanChangeGovernment(GovernmentType newType)
+    {
+        if (IsInAnarchy) return false;
+        if (newType == PlayerGovernment) return false;
+        var gov = Government.Get(newType);
+        if (gov.RequiredTechId != null && !Research.IsResearched(gov.RequiredTechId)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Start a revolution to change government. Triggers anarchy for a random number of turns.
+    /// Religious trait reduces anarchy to 1 turn.
+    /// </summary>
+    public bool ChangeGovernment(GovernmentType newType)
+    {
+        if (!CanChangeGovernment(newType)) return false;
+
+        var targetGov = Government.Get(newType);
+
+        // Religious trait: anarchy lasts only 1 turn
+        bool isReligious = PlayerCiv.Trait1 == CivTrait.Religious || PlayerCiv.Trait2 == CivTrait.Religious;
+
+        if (targetGov.CausesAnarchy && PlayerGovernment != GovernmentType.Despotism)
+        {
+            if (isReligious)
+            {
+                AnarchyTurnsRemaining = 1;
+            }
+            else
+            {
+                var rng = new Random();
+                AnarchyTurnsRemaining = rng.Next(targetGov.AnarchyMinTurns, targetGov.AnarchyMaxTurns + 1);
+            }
+            PendingGovernment = newType;
+            Console.WriteLine($"[Government] Revolution! Anarchy will last {AnarchyTurnsRemaining} turn(s). Transitioning to {targetGov.Name}...");
+        }
+        else
+        {
+            // No anarchy when leaving Despotism or if not CausesAnarchy
+            PlayerGovernment = newType;
+            Console.WriteLine($"[Government] Government changed to {targetGov.Name}.");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Get list of governments the player has unlocked (has required tech).
+    /// </summary>
+    public GovernmentType[] GetAvailableGovernments()
+    {
+        return Government.All
+            .Where(g =>
+            {
+                var gov = Government.Get(g);
+                return gov.RequiredTechId == null || Research.IsResearched(gov.RequiredTechId);
+            })
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Check if a completed wonder triggers a Golden Age for the building faction.
+    /// A wonder triggers GA if it has AssociatedTraits matching BOTH traits of the civ.
+    /// </summary>
+    public void CheckWonderGoldenAgeTrigger(Wonder wonder, Faction faction)
+    {
+        if (wonder.AssociatedTraits.Length < 2) return;
+
+        var civ = faction == Faction.Player ? PlayerCiv : AiCiv;
+        var ga = faction == Faction.Player ? PlayerGoldenAge : AiGoldenAge;
+
+        if (ga.HasBeenUsed) return;
+
+        // Check if wonder's traits contain BOTH of the civ's traits
+        bool matchesTrait1 = wonder.AssociatedTraits.Contains(civ.Trait1);
+        bool matchesTrait2 = wonder.AssociatedTraits.Contains(civ.Trait2);
+
+        if (matchesTrait1 && matchesTrait2)
+        {
+            ga.Trigger(civ.Name, $"Built {wonder.Name} (matches {civ.Trait1} + {civ.Trait2})");
+        }
+    }
+
+    /// <summary>
+    /// Check if a Unique Unit combat victory triggers a Golden Age.
+    /// First UU victory triggers the GA for that faction.
+    /// </summary>
+    public void CheckUniqueUnitGoldenAgeTrigger(Unit winner)
+    {
+        var ga = winner.Faction == Faction.Player ? PlayerGoldenAge : AiGoldenAge;
+        if (ga.HasBeenUsed) return;
+
+        var civ = winner.Faction == Faction.Player ? PlayerCiv : AiCiv;
+
+        // Check if this unit is a Unique Unit (has bonuses from its civ)
+        bool isUniqueUnit = winner.CivilizationId == civ.Id &&
+            winner.Type == civ.ReplacedUnitType &&
+            (civ.UniqueUnitAttackBonus > 0 || civ.UniqueUnitDefenseBonus > 0 || civ.UniqueUnitMovementBonus > 0);
+
+        if (isUniqueUnit)
+        {
+            ga.Trigger(civ.Name, $"{civ.UniqueUnitName} won in combat");
+        }
+    }
+
+    /// <summary>
+    /// Get the count of distinct luxury resources connected to player cities.
+    /// Used for happiness calculation.
+    /// </summary>
+    public int GetConnectedLuxuryCount()
+    {
+        var luxuries = new HashSet<string>();
+        foreach (var city in Cities.Where(c => c.Faction == Faction.Player))
+        {
+            // Check city tile and worked tiles
+            for (int dx = -2; dx <= 2; dx++)
+            {
+                for (int dy = -2; dy <= 2; dy++)
+                {
+                    if (Math.Abs(dx) + Math.Abs(dy) > 2) continue;
+                    int tx = city.X + dx;
+                    int ty = city.Y + dy;
+                    var tile = Map.GetTile(tx, ty);
+                    if (tile?.Resource is LuxuryResource lux && tile.OwnerCityId == city.Id)
+                        luxuries.Add(lux.Id);
+                }
+            }
+        }
+        return luxuries.Count;
+    }
+
+    /// <summary>
+    /// Get the set of luxury resource IDs connected to a specific city.
+    /// </summary>
+    public HashSet<string> GetCityConnectedLuxuries(City city)
+    {
+        var luxuries = new HashSet<string>();
+        for (int dx = -2; dx <= 2; dx++)
+        {
+            for (int dy = -2; dy <= 2; dy++)
+            {
+                if (Math.Abs(dx) + Math.Abs(dy) > 2) continue;
+                int tx = city.X + dx;
+                int ty = city.Y + dy;
+                var tile = Map.GetTile(tx, ty);
+                if (tile?.Resource is LuxuryResource lux && tile.OwnerCityId == city.Id)
+                    luxuries.Add(lux.Id);
+            }
+        }
+        return luxuries;
     }
 
     private void HealWoundedUnits()
@@ -1499,7 +1916,22 @@ public class GameSimulation
         {
             if (unit.Type == UnitType.Worker && unit.IsWorkerBuilding())
             {
-                unit.ConstructionTurnsRemaining--;
+                // Apply government worker efficiency
+                var workerGov = Government.Get(unit.Faction == Faction.Player ? PlayerGovernment : AiGovernment);
+                int efficiency = workerGov.WorkerEfficiency;
+
+                // 50% = work every other turn; 100% = normal; 150% = extra work every 2nd turn; 200% = double
+                if (efficiency <= 50 && TurnNumber % 2 != 0)
+                {
+                    // Skip this turn (half speed)
+                    continue;
+                }
+
+                int progress = 1;
+                if (efficiency >= 200) progress = 2;
+                else if (efficiency >= 150 && TurnNumber % 2 == 0) progress = 2;
+
+                unit.ConstructionTurnsRemaining -= progress;
                 Console.WriteLine($"[Construction] Worker {unit.Id} working at ({unit.X}, {unit.Y}). {unit.ConstructionTurnsRemaining} turns remaining for {unit.ImprovementUnderConstruction!.Name}.");
 
                 if (unit.ConstructionTurnsRemaining <= 0)
@@ -1806,12 +2238,64 @@ public class GameSimulation
             }
 
             // Sum up yields from working tiles
+            // Apply: Government tile penalty/bonus, Golden Age bonus
+            var ga = city.Faction == Faction.Player ? PlayerGoldenAge : AiGoldenAge;
+            var cityGov = Government.Get(city.Faction == Faction.Player ? PlayerGovernment : AiGovernment);
             foreach (var tile in workingTiles)
             {
                 var yield = tile.TotalYield;
-                food += yield.Food;
-                production += yield.Production;
-                commerce += yield.Commerce;
+                int tileFood = yield.Food;
+                int tileProd = yield.Production;
+                int tileComm = yield.Commerce;
+
+                // Despotism/Feudalism penalty: -1 on any yield type ≥ 3
+                if (cityGov.HasTilePenalty)
+                {
+                    if (tileFood >= 3) tileFood--;
+                    if (tileProd >= 3) tileProd--;
+                    if (tileComm >= 3) tileComm--;
+                }
+
+                // Republic/Democracy commerce bonus: +1 commerce on tiles producing ≥1
+                if (cityGov.HasCommerceBonus && tileComm >= 1)
+                {
+                    tileComm++;
+                }
+
+                // Golden Age: +1 shield on tiles with ≥1 production, +1 commerce on tiles with ≥1 commerce
+                if (ga.IsActive)
+                {
+                    if (tileProd >= 1) tileProd++;
+                    if (tileComm >= 1) tileComm++;
+                }
+
+                food += tileFood;
+                production += tileProd;
+                commerce += tileComm;
+            }
+
+            // Also apply Golden Age + government bonuses to center tile
+            if (centerTile != null)
+            {
+                var cYield = centerTile.TotalYield;
+                // Despotism penalty on center
+                if (cityGov.HasTilePenalty)
+                {
+                    if (cYield.Food >= 3) food--;
+                    if (cYield.Production >= 3) production--;
+                    if (cYield.Commerce >= 3) commerce--;
+                }
+                // Commerce bonus on center
+                if (cityGov.HasCommerceBonus && cYield.Commerce >= 1)
+                {
+                    commerce++;
+                }
+                // Golden Age on center
+                if (ga.IsActive)
+                {
+                    if (cYield.Production >= 1) production++;
+                    if (cYield.Commerce >= 1) commerce++;
+                }
             }
 
             // Apply Small Wonder modifiers
@@ -1824,15 +2308,34 @@ public class GameSimulation
                 production *= 2;
             }
 
-            // Apply Corruption & Waste (based on distance to capital)
+            // Apply Corruption & Waste (based on government type and distance to capital)
             int dist = GetDistanceToNearestCapital(city);
-            float corruptionRate = city.IsCapital ? 0f : Math.Min(dist * 0.10f, 0.70f);
-            float wasteRate = city.IsCapital ? 0f : Math.Min(dist * 0.08f, 0.50f);
+            float corruptionRate;
+            float wasteRate;
+
+            if (city.IsCapital)
+            {
+                corruptionRate = 0f;
+                wasteRate = 0f;
+            }
+            else if (cityGov.Corruption == CorruptionLevel.Communal)
+            {
+                // Communism: flat corruption everywhere regardless of distance
+                corruptionRate = 0.20f;
+                wasteRate = 0.15f;
+            }
+            else
+            {
+                // Distance-based corruption scaled by government modifier
+                corruptionRate = Math.Min(dist * 0.10f * cityGov.CorruptionModifier, 0.80f);
+                wasteRate = Math.Min(dist * 0.08f * cityGov.CorruptionModifier, 0.60f);
+            }
 
             // Commercial Trait: 25% lower base corruption
             if (city.HasTrait(CivTrait.Commercial))
             {
                 corruptionRate *= 0.75f;
+                wasteRate *= 0.75f;
             }
 
             // Difficulty: Player corruption modifier (easier levels reduce corruption)
@@ -1859,12 +2362,37 @@ public class GameSimulation
                 commerce = (int)Math.Round(commerce * DifficultyConfig.AiYieldMultiplier);
             }
 
-            // Civil Disorder halts all production and commerce
+            // ANARCHY: During revolution, all player cities produce nothing
+            if (city.Faction == Faction.Player && IsInAnarchy)
+            {
+                food = city.Population * 2; // Just enough to not starve (subsistence)
+                production = 0;
+                commerce = 0;
+            }
+
+            // Civil Disorder halts all production, commerce, and food surplus
             if (city.IsInDisorder)
             {
                 production = 0;
                 commerce = 0;
-                Console.WriteLine($"[REVOLT] {city.Name} is in Civil Disorder! Production and Commerce are completely HALTED.");
+                food = Math.Min(food, city.Population * 2); // No food surplus, just subsistence
+                city.DisorderTurns++;
+                Console.WriteLine($"[REVOLT] {city.Name} is in Civil Disorder (turn {city.DisorderTurns})! Production, Commerce and Growth HALTED.");
+
+                // Democracy: 3+ turns of continuous disorder → automatic revolution to Anarchy→Despotism
+                if (city.Faction == Faction.Player && PlayerGovernment == GovernmentType.Democracy && city.DisorderTurns >= 3)
+                {
+                    if (!IsInAnarchy)
+                    {
+                        Console.WriteLine($"[REVOLUTION] Prolonged civil disorder in {city.Name} has caused your Democracy to collapse!");
+                        AnarchyTurnsRemaining = 4;
+                        PendingGovernment = GovernmentType.Despotism;
+                    }
+                }
+            }
+            else
+            {
+                city.DisorderTurns = 0;
             }
 
             // 4.5 Pollution Event Roll (1.5% probability per point of pollution per turn)
@@ -1933,8 +2461,22 @@ public class GameSimulation
                 if (city.Population > 1)
                 {
                     city.Population--;
-                    city.StoredFood = city.FoodNeededForGrowth / 2; // Soft cushion after population loss
-                    Console.WriteLine($"[Famine] {city.Name} has starved! Population shrank to {city.Population}.");
+                    city.StoredFood = 0;
+
+                    // Civ3: Starvation may destroy a building (most expensive non-essential)
+                    var destroyCandidate = city.Buildings
+                        .Where(b => b is not Palace && b is not Granary)
+                        .OrderByDescending(b => b.ProductionCost)
+                        .FirstOrDefault();
+                    if (destroyCandidate != null)
+                    {
+                        city.Buildings.Remove(destroyCandidate);
+                        Console.WriteLine($"[Famine] {city.Name} has starved! Population shrank to {city.Population}. {destroyCandidate.Name} was destroyed by the famine!");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[Famine] {city.Name} has starved! Population shrank to {city.Population}.");
+                    }
                 }
                 else
                 {
@@ -2006,10 +2548,39 @@ public class GameSimulation
             scienceGain = 0;
         }
 
+        // Unit Support Cost (Civ3 mechanic):
+        // Government provides free unit slots per city based on city size (Town/City/Metropolis)
+        var playerGov = Government.Get(PlayerGovernment);
+        int freeUnitSlots = 0;
+        foreach (var c in Cities.Where(c => c.Faction == Faction.Player))
+        {
+            freeUnitSlots += playerGov.GetUnitSupport(c.Population);
+        }
+        int totalPlayerUnits = Units.Count(u => u.Faction == Faction.Player);
+        int excessUnits = Math.Max(0, totalPlayerUnits - freeUnitSlots);
+        int unitSupportCost = excessUnits * playerGov.UnitSupportCost;
+
+        if (unitSupportCost > 0)
+        {
+            goldGain -= unitSupportCost;
+            totalMaintenanceThisTurn += unitSupportCost;
+            Console.WriteLine($"[Economy] Unit support cost: {unitSupportCost} gold ({excessUnits} excess units × {playerGov.UnitSupportCost}g, {playerGov.Name} free slots: {freeUnitSlots})");
+        }
+
         PlayerTreasury += goldGain;
         if (PlayerTreasury < 0)
         {
-            PlayerTreasury = 0; // Cap at 0 for now (later we might disband units)
+            // Disband most expensive unsupported unit when bankrupt
+            var disbandCandidate = Units
+                .Where(u => u.Faction == Faction.Player && u.Type != UnitType.Settler && u.Type != UnitType.Worker)
+                .OrderByDescending(u => u.AttackStrength + u.DefenseStrength)
+                .FirstOrDefault();
+            if (disbandCandidate != null)
+            {
+                Console.WriteLine($"[Economy] BANKRUPT! Disbanded {disbandCandidate.Type} at ({disbandCandidate.X}, {disbandCandidate.Y}) due to lack of treasury!");
+                Units.Remove(disbandCandidate);
+            }
+            PlayerTreasury = 0;
         }
 
         // Wall Street effect: +5% interest on player's treasury (capped at 50 gold per turn)
@@ -2034,6 +2605,7 @@ public class GameSimulation
 
         LastTurnIncome = totalCommerceThisTurn;
         LastTurnMaintenance = totalMaintenanceThisTurn;
+        LastTurnUnitSupport = unitSupportCost;
         LastTurnScience = scienceGain;
         LastTurnNetGold = goldGain;
 

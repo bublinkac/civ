@@ -153,6 +153,10 @@ public class JsonSaveSystem : ISaveSystem
         foreach (var part in sim.AiBuiltSpaceshipParts)
             dto.AiBuiltSpaceshipParts.Add(part.ToString());
 
+        // Histograph
+        dto.PlayerHistograph = new(sim.Histograph.PlayerHistory);
+        dto.AiHistograph = new(sim.Histograph.AiHistory);
+
         // Serialize to file
         string path = GetSavePath(slotName);
         var options = new JsonSerializerOptions { WriteIndented = true };
@@ -224,6 +228,12 @@ public class JsonSaveSystem : ISaveSystem
             foreach (var partStr in dto.AiBuiltSpaceshipParts)
                 if (Enum.TryParse<ProductionProject>(partStr, out var pp))
                     sim.AiBuiltSpaceshipParts.Add(pp);
+
+            // Restore Histograph
+            sim.Histograph.PlayerHistory.Clear();
+            sim.Histograph.PlayerHistory.AddRange(dto.PlayerHistograph);
+            sim.Histograph.AiHistory.Clear();
+            sim.Histograph.AiHistory.AddRange(dto.AiHistograph);
 
             // Reconstruct Visibility Grid
             int index = 0;

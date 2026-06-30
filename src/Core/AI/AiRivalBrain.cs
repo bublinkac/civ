@@ -159,6 +159,9 @@ public static class AiRivalBrain
     {
         if (city.CurrentProject != ProductionProject.None) return;
 
+        // Update AI city citizen mood for decision-making
+        city.UpdateCitizenMood(sim, sim.DifficultyConfig);
+
         // Check if under immediate threat (enemy unit within 3 tiles)
         bool underThreat = false;
         var playerUnits = sim.Units.Where(u => u.Faction == Faction.Player).ToList();
@@ -174,6 +177,56 @@ public static class AiRivalBrain
 
         // Garrison strength check
         int garrisonCount = sim.Units.Count(u => u.X == city.X && u.Y == city.Y && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
+
+        // Priority 0a: Handle starvation — build Granary if city food is negative
+        if (city.LastTurnNetFood < 0 && !city.Buildings.Any(b => b.Id == "granary"))
+        {
+            city.CurrentProject = ProductionProject.Granary;
+            Console.WriteLine($"[AI Rival] City {city.Name} is starving (food: {city.LastTurnNetFood})! Building Granary.");
+            return;
+        }
+
+        // Priority 0b: Handle unhappiness/civil disorder
+        // AI prioritizes happiness buildings when city is in disorder or has many unhappy citizens
+        if (city.IsInDisorder || city.UnhappyCitizens > city.HappyCitizens + 1)
+        {
+            // Try Temple first (cheapest happiness building)
+            if (!city.Buildings.Any(b => b.Id == "temple"))
+            {
+                city.CurrentProject = ProductionProject.Temple;
+                Console.WriteLine($"[AI Rival] City {city.Name} is unhappy! Building Temple to restore order.");
+                return;
+            }
+            // Then Colosseum
+            if (!city.Buildings.Any(b => b.Id == "colosseum"))
+            {
+                var colosseumBuilding = BuildingRegistry.Get("colosseum");
+                if (colosseumBuilding != null && (colosseumBuilding.RequiredTechId == null || sim.IsTechResearched(city.Faction, colosseumBuilding.RequiredTechId)))
+                {
+                    city.CurrentProject = ProductionProject.Colosseum;
+                    Console.WriteLine($"[AI Rival] City {city.Name} is unhappy! Building Colosseum.");
+                    return;
+                }
+            }
+            // Then Cathedral
+            if (!city.Buildings.Any(b => b.Id == "cathedral"))
+            {
+                var cathedralBuilding = BuildingRegistry.Get("cathedral");
+                if (cathedralBuilding != null && (cathedralBuilding.RequiredTechId == null || sim.IsTechResearched(city.Faction, cathedralBuilding.RequiredTechId)))
+                {
+                    city.CurrentProject = ProductionProject.Cathedral;
+                    Console.WriteLine($"[AI Rival] City {city.Name} is unhappy! Building Cathedral.");
+                    return;
+                }
+            }
+            // Last resort: Marketplace for luxury happiness amplification
+            if (!city.Buildings.Any(b => b.Id == "marketplace"))
+            {
+                city.CurrentProject = ProductionProject.Marketplace;
+                Console.WriteLine($"[AI Rival] City {city.Name} is unhappy! Building Marketplace for luxury amplification.");
+                return;
+            }
+        }
 
         // Priority 1: Defend the city if threatened or completely empty
         if (underThreat && garrisonCount < 2)
@@ -455,10 +508,16 @@ public static class AiRivalBrain
                         worker.StartImprovement(new Mine());
                         Console.WriteLine($"[AI Rival Worker] Started building Mine at ({worker.X}, {worker.Y})");
                     }
-                    else
+                    else if (new Farm().CanBeBuiltOn(targetTile.Terrain) && sim.HasIrrigationAccess(worker.X, worker.Y))
                     {
                         worker.StartImprovement(new Farm());
                         Console.WriteLine($"[AI Rival Worker] Started building Farm at ({worker.X}, {worker.Y})");
+                    }
+                    else if (new Mine().CanBeBuiltOn(targetTile.Terrain))
+                    {
+                        // Fallback: build Mine if can't irrigate
+                        worker.StartImprovement(new Mine());
+                        Console.WriteLine($"[AI Rival Worker] No irrigation access, building Mine instead at ({worker.X}, {worker.Y})");
                     }
                 }
                 else if (!targetTile.HasRoad)

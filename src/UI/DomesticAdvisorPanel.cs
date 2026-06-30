@@ -208,13 +208,32 @@ public partial class DomesticAdvisorPanel : PanelContainer
         cMargin.AddChild(_citiesList);
         citiesScroll.AddChild(cMargin);
         
+        // --- MAP + CITIES SPLIT ---
+        var citiesSplit = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
+        citiesSplit.AddThemeConstantOverride("separation", 10);
+
+        var domesticMapOptions = new AdvisorMapOptions
+        {
+            MinSize = new Vector2(200, 140),
+            ShowCities = true,
+            ShowUnits = false,
+            ShowTerritory = true,
+            ShowCityNames = true,
+            ShowFogOfWar = false,
+            CityFactionFilter = Faction.Player,
+            CityDotScale = 2.2f
+        };
+        var domesticMap = new AdvisorMapPanel(_sim, domesticMapOptions);
+        domesticMap.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        citiesSplit.AddChild(domesticMap);
+
         var citiesWrapperMargin = new MarginContainer();
         citiesWrapperMargin.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        citiesWrapperMargin.AddThemeConstantOverride("margin_left", 30);
-        citiesWrapperMargin.AddThemeConstantOverride("margin_right", 30);
+        citiesWrapperMargin.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         citiesWrapperMargin.AddChild(citiesScroll);
+        citiesSplit.AddChild(citiesWrapperMargin);
         
-        mainVBox.AddChild(citiesWrapperMargin);
+        mainVBox.AddChild(citiesSplit);
         
         // --- FOOTER ---
         var footerMargin = new MarginContainer();

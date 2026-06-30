@@ -31,10 +31,22 @@ public partial class MapRenderer : TileMapLayer
     private AdvisorsMenu? _advisorsMenu;
     private TechTreePanel? _techTreePanel;
     private DomesticAdvisorPanel? _domesticAdvisorPanel;
+    private MilitaryAdvisorPanel? _militaryAdvisorPanel;
+    private ForeignAdvisorPanel? _foreignAdvisorPanel;
+    private CulturalAdvisorPanel? _culturalAdvisorPanel;
+    private TradeAdvisorPanel? _tradeAdvisorPanel;
+    private GovernmentPanel? _governmentPanel;
+    private HistographPanel? _histographPanel;
     private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) || 
                                        GodotObject.IsInstanceValid(_advisorsMenu) || 
                                        GodotObject.IsInstanceValid(_techTreePanel) || 
-                                       GodotObject.IsInstanceValid(_domesticAdvisorPanel);
+                                       GodotObject.IsInstanceValid(_domesticAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_militaryAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_foreignAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_culturalAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_tradeAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_governmentPanel) ||
+                                       GodotObject.IsInstanceValid(_histographPanel);
 
 
     private MainMenu? _mainMenu;
@@ -68,6 +80,10 @@ public partial class MapRenderer : TileMapLayer
         _advisorsMenu = new AdvisorsMenu();
         _advisorsMenu.OnOpenScienceAdvisor += OpenTechTree;
         _advisorsMenu.OnOpenDomesticAdvisor += OpenDomesticAdvisor;
+        _advisorsMenu.OnOpenMilitaryAdvisor += OpenMilitaryAdvisor;
+        _advisorsMenu.OnOpenForeignAdvisor += OpenForeignAdvisor;
+        _advisorsMenu.OnOpenCulturalAdvisor += OpenCulturalAdvisor;
+        _advisorsMenu.OnOpenTradeAdvisor += OpenTradeAdvisor;
         
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_advisorsMenu);
         else AddChild(_advisorsMenu);
@@ -93,6 +109,73 @@ public partial class MapRenderer : TileMapLayer
         
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_domesticAdvisorPanel);
         else AddChild(_domesticAdvisorPanel);
+    }
+
+    public void OpenMilitaryAdvisor()
+    {
+        if (GodotObject.IsInstanceValid(_militaryAdvisorPanel)) _militaryAdvisorPanel.QueueFree();
+        if (_sim == null) return;
+
+        _militaryAdvisorPanel = new MilitaryAdvisorPanel(_sim);
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_militaryAdvisorPanel);
+        else AddChild(_militaryAdvisorPanel);
+    }
+
+    public void OpenForeignAdvisor()
+    {
+        if (GodotObject.IsInstanceValid(_foreignAdvisorPanel)) _foreignAdvisorPanel.QueueFree();
+        if (_sim == null) return;
+
+        _foreignAdvisorPanel = new ForeignAdvisorPanel(_sim);
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_foreignAdvisorPanel);
+        else AddChild(_foreignAdvisorPanel);
+    }
+
+    public void OpenCulturalAdvisor()
+    {
+        if (GodotObject.IsInstanceValid(_culturalAdvisorPanel)) _culturalAdvisorPanel.QueueFree();
+        if (_sim == null) return;
+
+        _culturalAdvisorPanel = new CulturalAdvisorPanel(_sim);
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_culturalAdvisorPanel);
+        else AddChild(_culturalAdvisorPanel);
+    }
+
+    public void OpenTradeAdvisor()
+    {
+        if (GodotObject.IsInstanceValid(_tradeAdvisorPanel)) _tradeAdvisorPanel.QueueFree();
+        if (_sim == null) return;
+
+        _tradeAdvisorPanel = new TradeAdvisorPanel(_sim);
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_tradeAdvisorPanel);
+        else AddChild(_tradeAdvisorPanel);
+    }
+
+    public void OpenGovernment()
+    {
+        if (GodotObject.IsInstanceValid(_governmentPanel)) _governmentPanel.QueueFree();
+        if (_sim == null) return;
+
+        _governmentPanel = new GovernmentPanel(_sim);
+        _governmentPanel.OnClosed += () => UpdateUiAfterAction();
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_governmentPanel);
+        else AddChild(_governmentPanel);
+    }
+
+    public void OpenHistograph()
+    {
+        if (GodotObject.IsInstanceValid(_histographPanel)) _histographPanel.QueueFree();
+        if (_sim == null) return;
+
+        _histographPanel = new HistographPanel(_sim);
+        
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_histographPanel);
+        else AddChild(_histographPanel);
     }
 
     public override void _Ready()
@@ -1022,6 +1105,14 @@ public partial class MapRenderer : TileMapLayer
                 GD.Print($"[Research Queue] Active research project changed to: {projectInfo}");
         _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
     }
+            else if (keyEvent.Keycode == Key.F1) { OpenDomesticAdvisor(); }
+            else if (keyEvent.Keycode == Key.F2) { OpenTradeAdvisor(); }
+            else if (keyEvent.Keycode == Key.F3) { OpenMilitaryAdvisor(); }
+            else if (keyEvent.Keycode == Key.F4) { OpenForeignAdvisor(); }
+            else if (keyEvent.Keycode == Key.F5) { OpenCulturalAdvisor(); }
+            else if (keyEvent.Keycode == Key.F6) { OpenTechTree(); }
+            else if (keyEvent.Keycode == Key.F7) { OpenGovernment(); }
+            else if (keyEvent.Keycode == Key.F8) { OpenHistograph(); }
         }
     }
 
@@ -1149,6 +1240,20 @@ public partial class MapRenderer : TileMapLayer
                                         return;
                                     }
                                 }
+                                else if (imp is Farm)
+                                {
+                                    if (tile.Improvement != null)
+                                    {
+                                        GD.Print($"[Worker] There is already a {tile.Improvement.Name} built on this tile!");
+                                        return;
+                                    }
+                                    // Civ3: Farm requires irrigation access (fresh water or adjacent farm chain)
+                                    if (!_sim.HasIrrigationAccess(selectedUnit.X, selectedUnit.Y))
+                                    {
+                                        GD.Print("[Worker] Cannot build Farm: no irrigation access! Must be adjacent to fresh water, a city, or another Farm.");
+                                        return;
+                                    }
+                                }
                                 else
                                 {
                                     if (tile.Improvement != null)
@@ -1235,6 +1340,14 @@ public partial class MapRenderer : TileMapLayer
 
             case "open_tech_tree":
                 OpenTechTree();
+                break;
+
+            case "open_government":
+                OpenGovernment();
+                break;
+
+            case "open_histograph":
+                OpenHistograph();
                 break;
         }
     }

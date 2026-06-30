@@ -23,6 +23,7 @@ public partial class GameHud : CanvasLayer
 
     // Top buttons and modals
     private PanelContainer? _topBar;
+    private Button? _govButton;
     private PanelContainer? _civilopediaModal;
     private PanelContainer? _gameMenuModal;
 
@@ -85,6 +86,14 @@ public partial class GameHud : CanvasLayer
         var researchBtn = CreateStyledButton("🔬 Tech Tree", new Color(0.15f, 0.15f, 0.35f));
         researchBtn.Pressed += () => OnActionTriggered?.Invoke("open_tech_tree");
         hbox.AddChild(researchBtn);
+
+        _govButton = CreateStyledButton("⚖ Government", new Color(0.35f, 0.2f, 0.15f));
+        _govButton.Pressed += () => OnActionTriggered?.Invoke("open_government");
+        hbox.AddChild(_govButton);
+
+        var histoBtn = CreateStyledButton("📊 Histograph", new Color(0.2f, 0.25f, 0.35f));
+        histoBtn.Pressed += () => OnActionTriggered?.Invoke("open_histograph");
+        hbox.AddChild(histoBtn);
 
         _topBar.AddChild(hbox);
         AddChild(_topBar);
@@ -572,6 +581,22 @@ public partial class GameHud : CanvasLayer
             }
         }
         
+        // Update government button to show anarchy or current government
+        if (_govButton != null)
+        {
+            if (sim.IsInAnarchy)
+            {
+                _govButton.Text = $"⚠ ANARCHY ({sim.AnarchyTurnsRemaining})";
+                _govButton.AddThemeColorOverride("font_color", new Color(1.0f, 0.3f, 0.3f));
+            }
+            else
+            {
+                var gov = Government.Get(sim.PlayerGovernment);
+                _govButton.Text = $"⚖ {gov.Name}";
+                _govButton.RemoveThemeColorOverride("font_color");
+            }
+        }
+
         // Refresh Minimap
         _minimap?.SetSimulation(sim);
 
@@ -699,7 +724,7 @@ public partial class GameHud : CanvasLayer
                                     {
                                         if (tile.Improvement == null)
                                         {
-                                            if (new Farm().CanBeBuiltOn(tile.Terrain))
+                                            if (new Farm().CanBeBuiltOn(tile.Terrain) && _sim != null && _sim.HasIrrigationAccess(tile.X, tile.Y))
                                             {
                                                 var btn = CreateActionButton("🌾", "Irrigate", "I", () => OnActionTriggered?.Invoke("farm"), new Color(0.35f, 0.3f, 0.15f));
                                                 _actionsBox.AddChild(btn);
