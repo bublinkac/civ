@@ -13,23 +13,32 @@ public partial class ForeignAdvisorPanel : PanelContainer
 {
     private GameSimulation _sim;
 
-    public ForeignAdvisorPanel(GameSimulation sim)
+    public ForeignAdvisorPanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
         Name = "ForeignAdvisorPanel";
 
-        SetAnchorsPreset(LayoutPreset.FullRect);
-        MouseFilter = MouseFilterEnum.Stop;
-
-        var styleBox = new StyleBoxFlat
+        if (!embedded)
         {
-            BgColor = new Color(0.9f, 0.88f, 0.8f, 0.95f),
-            BorderWidthTop = 4, BorderWidthBottom = 4, BorderWidthLeft = 4, BorderWidthRight = 4,
-            BorderColor = new Color(0.7f, 0.65f, 0.4f),
-            CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8
-        };
-        AddThemeStyleboxOverride("panel", styleBox);
+            SetAnchorsPreset(LayoutPreset.FullRect);
+            MouseFilter = MouseFilterEnum.Stop;
+            var styleBox = new StyleBoxFlat
+            {
+                BgColor = new Color(0.9f, 0.88f, 0.8f, 0.95f),
+                BorderWidthTop = 4, BorderWidthBottom = 4, BorderWidthLeft = 4, BorderWidthRight = 4,
+                BorderColor = new Color(0.7f, 0.65f, 0.4f),
+                CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8,
+                CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8
+            };
+            AddThemeStyleboxOverride("panel", styleBox);
+        }
+        else
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            var transparentStyle = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
+            AddThemeStyleboxOverride("panel", transparentStyle);
+        }
 
         var canvasBorder = new PanelContainer();
         canvasBorder.SizeFlagsVertical = SizeFlags.ExpandFill;
@@ -47,25 +56,27 @@ public partial class ForeignAdvisorPanel : PanelContainer
         var mainVBox = new VBoxContainer();
         mainVBox.AddThemeConstantOverride("separation", 20);
 
-        // --- HEADER ---
-        var headerHBox = new HBoxContainer();
-        var titleLabel = new Label
+        if (!embedded)
         {
-            Text = "F O R E I G N   A D V I S O R",
-            HorizontalAlignment = HorizontalAlignment.Center,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
-        };
-        titleLabel.AddThemeFontSizeOverride("font_size", 28);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
+            var headerHBox = new HBoxContainer();
+            var titleLabel = new Label
+            {
+                Text = "F O R E I G N   A D V I S O R",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            titleLabel.AddThemeFontSizeOverride("font_size", 28);
+            titleLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
 
-        var closeBtn = new Button { Text = "\u2716", Flat = true, CustomMinimumSize = new Vector2(40, 40) };
-        closeBtn.AddThemeColorOverride("font_color", new Color(0.8f, 0.2f, 0.2f));
-        closeBtn.AddThemeFontSizeOverride("font_size", 24);
-        closeBtn.Pressed += () => QueueFree();
+            var closeBtn = new Button { Text = "\u2716", Flat = true, CustomMinimumSize = new Vector2(40, 40) };
+            closeBtn.AddThemeColorOverride("font_color", new Color(0.8f, 0.2f, 0.2f));
+            closeBtn.AddThemeFontSizeOverride("font_size", 24);
+            closeBtn.Pressed += () => QueueFree();
 
-        headerHBox.AddChild(titleLabel);
-        headerHBox.AddChild(closeBtn);
-        mainVBox.AddChild(headerHBox);
+            headerHBox.AddChild(titleLabel);
+            headerHBox.AddChild(closeBtn);
+            mainVBox.AddChild(headerHBox);
+        }
 
         // --- ADVISOR MESSAGE ---
         var advisorBox = new HBoxContainer();
@@ -158,18 +169,20 @@ public partial class ForeignAdvisorPanel : PanelContainer
         contentSplit.AddChild(tableVBox);
         mainVBox.AddChild(contentSplit);
 
-        // --- FOOTER ---
-        var footerMargin = new MarginContainer();
-        footerMargin.AddThemeConstantOverride("margin_top", 10);
-        footerMargin.AddThemeConstantOverride("margin_bottom", 10);
-        footerMargin.AddThemeConstantOverride("margin_right", 20);
-        var footerCloseBtn = new Button { Text = "Close Advisor", CustomMinimumSize = new Vector2(150, 40) };
-        footerCloseBtn.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
-        var btnStyle2 = new StyleBoxFlat { BgColor = new Color(0.7f, 0.2f, 0.2f, 1.0f), CornerRadiusTopLeft = 5, CornerRadiusTopRight = 5, CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5 };
-        footerCloseBtn.AddThemeStyleboxOverride("normal", btnStyle2);
-        footerCloseBtn.Pressed += () => QueueFree();
-        footerMargin.AddChild(footerCloseBtn);
-        mainVBox.AddChild(footerMargin);
+        if (!embedded)
+        {
+            var footerMargin = new MarginContainer();
+            footerMargin.AddThemeConstantOverride("margin_top", 10);
+            footerMargin.AddThemeConstantOverride("margin_bottom", 10);
+            footerMargin.AddThemeConstantOverride("margin_right", 20);
+            var footerCloseBtn = new Button { Text = "Close Advisor", CustomMinimumSize = new Vector2(150, 40) };
+            footerCloseBtn.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+            var btnStyle2 = new StyleBoxFlat { BgColor = new Color(0.7f, 0.2f, 0.2f, 1.0f), CornerRadiusTopLeft = 5, CornerRadiusTopRight = 5, CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5 };
+            footerCloseBtn.AddThemeStyleboxOverride("normal", btnStyle2);
+            footerCloseBtn.Pressed += () => QueueFree();
+            footerMargin.AddChild(footerCloseBtn);
+            mainVBox.AddChild(footerMargin);
+        }
 
         margin.AddChild(mainVBox);
         canvasBorder.AddChild(margin);

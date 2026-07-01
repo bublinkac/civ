@@ -9,6 +9,7 @@ public partial class TechTreePanel : PanelContainer
 {
     private GameSimulation _sim;
     private TechEra _currentEra = TechEra.Ancient;
+    private bool _embedded;
     
     private Control _canvas;
     private HBoxContainer _tabsContainer;
@@ -25,51 +26,69 @@ public partial class TechTreePanel : PanelContainer
     private const int MARGIN_X = 40;
     private const int MARGIN_Y = 40;
 
-    public TechTreePanel(GameSimulation sim)
+    public TechTreePanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
+        _embedded = embedded;
 
-        // Panel Setup
         MouseFilter = MouseFilterEnum.Stop;
-        ZIndex = 120;
 
-        var style = new StyleBoxFlat
+        if (!embedded)
         {
-            BgColor = new Color(0.92f, 0.88f, 0.78f, 1.0f), // Papyrus/Parchment background like Civ3
-            BorderWidthLeft = 6, BorderWidthTop = 6, BorderWidthRight = 6, BorderWidthBottom = 6,
-            BorderColor = new Color(0.85f, 0.8f, 0.65f, 1.0f),
-            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
-            ShadowSize = 25,
-            ShadowColor = new Color(0, 0, 0, 0.6f)
-        };
-        AddThemeStyleboxOverride("panel", style);
+            // Standalone panel setup
+            ZIndex = 120;
 
-        CustomMinimumSize = new Vector2(1000, 700);
-        AnchorLeft = 0.5f;
-        AnchorTop = 0.5f;
-        AnchorRight = 0.5f;
-        AnchorBottom = 0.5f;
-        OffsetLeft = -500;
-        OffsetTop = -350;
-        OffsetRight = 500;
-        OffsetBottom = 350;
-        GrowHorizontal = GrowDirection.Both;
-        GrowVertical = GrowDirection.Both;
+            var style = new StyleBoxFlat
+            {
+                BgColor = new Color(0.92f, 0.88f, 0.78f, 1.0f),
+                BorderWidthLeft = 6, BorderWidthTop = 6, BorderWidthRight = 6, BorderWidthBottom = 6,
+                BorderColor = new Color(0.85f, 0.8f, 0.65f, 1.0f),
+                CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+                ShadowSize = 25,
+                ShadowColor = new Color(0, 0, 0, 0.6f)
+            };
+            AddThemeStyleboxOverride("panel", style);
+
+            CustomMinimumSize = new Vector2(1000, 700);
+            AnchorLeft = 0.5f;
+            AnchorTop = 0.5f;
+            AnchorRight = 0.5f;
+            AnchorBottom = 0.5f;
+            OffsetLeft = -500;
+            OffsetTop = -350;
+            OffsetRight = 500;
+            OffsetBottom = 350;
+            GrowHorizontal = GrowDirection.Both;
+            GrowVertical = GrowDirection.Both;
+        }
+        else
+        {
+            // Embedded: fill parent, transparent bg
+            SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            var style = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
+            AddThemeStyleboxOverride("panel", style);
+        }
 
         var mainVBox = new VBoxContainer();
+        mainVBox.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        mainVBox.SizeFlagsVertical = SizeFlags.ExpandFill;
         AddChild(mainVBox);
 
-        // --- HEADER ---
-        var headerMargin = new MarginContainer();
-        headerMargin.AddThemeConstantOverride("margin_top", 10);
-        headerMargin.AddThemeConstantOverride("margin_bottom", 10);
-        
-        var titleLabel = new Label { Text = "S C I E N C E   A D V I S O R", HorizontalAlignment = HorizontalAlignment.Center };
-        titleLabel.AddThemeFontSizeOverride("font_size", 28);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
-        titleLabel.AddThemeFontOverride("font", ThemeDB.FallbackFont); // Use a serif font ideally
-        headerMargin.AddChild(titleLabel);
-        mainVBox.AddChild(headerMargin);
+        if (!embedded)
+        {
+            // --- HEADER (standalone only) ---
+            var headerMargin = new MarginContainer();
+            headerMargin.AddThemeConstantOverride("margin_top", 10);
+            headerMargin.AddThemeConstantOverride("margin_bottom", 10);
+            
+            var titleLabel = new Label { Text = "S C I E N C E   A D V I S O R", HorizontalAlignment = HorizontalAlignment.Center };
+            titleLabel.AddThemeFontSizeOverride("font_size", 28);
+            titleLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
+            titleLabel.AddThemeFontOverride("font", ThemeDB.FallbackFont);
+            headerMargin.AddChild(titleLabel);
+            mainVBox.AddChild(headerMargin);
+        }
 
         // --- ERA TABS ---
         var tabsHBox = new HBoxContainer();
@@ -195,12 +214,15 @@ public partial class TechTreePanel : PanelContainer
         rightArrow.Pressed += () => ChangeEra(_currentEra + 1);
         footerHBox.AddChild(rightArrow);
         
-        // Exit button
-        var closeBtn = new Button { Text = "X", CustomMinimumSize = new Vector2(40, 0) };
-        var closeStyle = new StyleBoxFlat { BgColor = new Color(0.8f, 0.2f, 0.2f), CornerRadiusTopLeft=3, CornerRadiusTopRight=3, CornerRadiusBottomLeft=3, CornerRadiusBottomRight=3 };
-        closeBtn.AddThemeStyleboxOverride("normal", closeStyle);
-        closeBtn.Pressed += QueueFree;
-        footerHBox.AddChild(closeBtn);
+        if (!embedded)
+        {
+            // Exit button (standalone only)
+            var closeBtn = new Button { Text = "X", CustomMinimumSize = new Vector2(40, 0) };
+            var closeStyle = new StyleBoxFlat { BgColor = new Color(0.8f, 0.2f, 0.2f), CornerRadiusTopLeft=3, CornerRadiusTopRight=3, CornerRadiusBottomLeft=3, CornerRadiusBottomRight=3 };
+            closeBtn.AddThemeStyleboxOverride("normal", closeStyle);
+            closeBtn.Pressed += QueueFree;
+            footerHBox.AddChild(closeBtn);
+        }
         
         footerMargin.AddChild(footerHBox);
         mainVBox.AddChild(footerMargin);

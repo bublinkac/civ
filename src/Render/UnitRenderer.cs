@@ -9,6 +9,7 @@ public partial class UnitRenderer : Node2D
 {
     private MapRenderer? _mapRenderer;
     private readonly Dictionary<string, Sprite2D> _sprites = new();
+    private readonly Dictionary<string, Node2D> _stackIndicators = new();
     private Sprite2D? _selectionRing;
     private string? _selectedUnitId;
 
@@ -69,56 +70,122 @@ public partial class UnitRenderer : Node2D
         _selectedUnitId = selectedUnitId;
         var activeIds = new HashSet<string>();
 
+        // Remove old stack indicators
+        foreach (var ind in _stackIndicators.Values)
+            ind.QueueFree();
+        _stackIndicators.Clear();
+
+        // Group units by tile
+        var tileGroups = new Dictionary<(int, int), List<Unit>>();
         foreach (var unit in sim.Units)
         {
-            activeIds.Add(unit.Id);
-            Vector2 targetPos = _mapRenderer.MapToLocal(new Vector2I(unit.X, unit.Y));
-            
-            // Adjust height offset so the unit stands upright on the center of the tile
-            targetPos.Y -= 16; 
+            var key = (unit.X, unit.Y);
+            if (!tileGroups.ContainsKey(key))
+                tileGroups[key] = new List<Unit>();
+            tileGroups[key].Add(unit);
+        }
 
-            if (!_sprites.TryGetValue(unit.Id, out var sprite))
+        foreach (var kvp in tileGroups)
+        {
+            var (tileX, tileY) = kvp.Key;
+            var unitsOnTile = kvp.Value;
+
+            // Determine the "top" unit to display:
+            // 1. If the selected unit is on this tile, show it
+            // 2. Otherwise, show the strongest (highest attack+defense)
+            Unit topUnit;
+            var selectedOnTile = unitsOnTile.Find(u => u.Id == selectedUnitId);
+            if (selectedOnTile != null)
             {
-                sprite = new Sprite2D
-                {
-                    Texture = GetOrCreateUnitTexture(unit.Type),
-                    Position = targetPos,
-                    YSortEnabled = true
-                };
-                AddChild(sprite);
-                _sprites[unit.Id] = sprite;
+                topUnit = selectedOnTile;
             }
             else
             {
-                // Smooth slide tween for unit movements
-                if (sprite.Position != targetPos)
+                unitsOnTile.Sort((a, b) =>
+                    (b.AttackStrength + b.DefenseStrength).CompareTo(a.AttackStrength + a.DefenseStrength));
+                topUnit = unitsOnTile[0];
+            }
+
+            bool onCityTile = sim.Cities.Exists(c => c.X == tileX && c.Y == tileY);
+
+            foreach (var unit in unitsOnTile)
+            {
+                activeIds.Add(unit.Id);
+                bool isTop = unit.Id == topUnit.Id;
+
+                Vector2 targetPos = _mapRenderer.MapToLocal(new Vector2I(unit.X, unit.Y));
+                targetPos.Y -= 16;
+
+                if (onCityTile)
                 {
-                    var tween = CreateTween();
-                    tween.TweenProperty(sprite, "position", targetPos, 0.22f)
-                         .SetTrans(Tween.TransitionType.Quad)
-                         .SetEase(Tween.EaseType.Out);
+                    targetPos.X += 28;
+                    targetPos.Y += 14;
+                }
+
+                if (!_sprites.TryGetValue(unit.Id, out var sprite))
+                {
+                    sprite = new Sprite2D
+                    {
+                        Texture = GetOrCreateUnitTexture(unit.Type),
+                        Position = targetPos,
+                        YSortEnabled = true
+                    };
+                    AddChild(sprite);
+                    _sprites[unit.Id] = sprite;
+                }
+                else
+                {
+                    if (sprite.Position != targetPos)
+                    {
+                        var tween = CreateTween();
+                        tween.TweenProperty(sprite, "position", targetPos, 0.22f)
+                             .SetTrans(Tween.TransitionType.Quad)
+                             .SetEase(Tween.EaseType.Out);
+                    }
+                }
+
+                // Only show the top unit; hide all others in the stack
+                sprite.Visible = isTop;
+
+                sprite.Scale = onCityTile ? new Vector2(0.75f, 0.75f) : new Vector2(1.0f, 1.0f);
+
+                // Apply faction color tint
+                if (unit.Faction == Faction.Barbarian)
+                    sprite.SelfModulate = new Color(0.9f, 0.4f, 0.4f);
+                else if (unit.Faction == Faction.AiRival)
+                    sprite.SelfModulate = new Color(0.7f, 0.6f, 0.9f);
+                else
+                    sprite.SelfModulate = Colors.White;
+
+                // Selection ring follows the top unit
+                if (unit.Id == selectedUnitId)
+                {
+                    _selectionRing!.Visible = true;
+                    var ringPos = _mapRenderer.MapToLocal(new Vector2I(unit.X, unit.Y));
+                    if (onCityTile)
+                    {
+                        ringPos.X += 28;
+                        ringPos.Y += 14;
+                    }
+                    _selectionRing.Position = ringPos;
                 }
             }
 
-            // Apply modulation color based on faction to distinguish units
-            if (unit.Faction == Faction.Barbarian)
+            // Draw Civ3-style stack indicator bars if more than 1 unit on this tile
+            if (unitsOnTile.Count > 1)
             {
-                sprite.SelfModulate = new Color(0.9f, 0.4f, 0.4f); // Reddish tint for Barbarians
-            }
-            else if (unit.Faction == Faction.AiRival)
-            {
-                sprite.SelfModulate = new Color(0.7f, 0.6f, 0.9f); // Purple tint for AI
-            }
-            else
-            {
-                sprite.SelfModulate = Colors.White; // Normal (no tint) for Player
-            }
+                Vector2 barPos = _mapRenderer.MapToLocal(new Vector2I(tileX, tileY));
+                barPos.Y -= 16;
+                if (onCityTile)
+                {
+                    barPos.X += 28;
+                    barPos.Y += 14;
+                }
 
-            // Update selection ring position under the selected unit
-            if (unit.Id == selectedUnitId)
-            {
-                _selectionRing!.Visible = true;
-                _selectionRing.Position = _mapRenderer.MapToLocal(new Vector2I(unit.X, unit.Y));
+                var indicator = CreateStackIndicator(unitsOnTile.Count, topUnit.Faction);
+                indicator.Position = barPos + new Vector2(-24, 20);
+                AddChild(indicator);
+                _stackIndicators[$"{tileX}_{tileY}"] = indicator;
             }
         }
 
@@ -141,6 +208,77 @@ public partial class UnitRenderer : Node2D
         {
             _sprites.Remove(id);
         }
+    }
+
+    private Node2D CreateStackIndicator(int count, Faction faction)
+    {
+        var container = new Node2D();
+
+        // Civ3 style: small colored bars stacked vertically below the unit
+        // Each bar = 1 additional unit (so 2 units = 1 bar, 3 = 2 bars, etc.)
+        int bars = Math.Min(count - 1, 6); // Cap visual bars at 6
+        Color barColor = faction switch
+        {
+            Faction.Barbarian => new Color(0.9f, 0.3f, 0.3f, 0.9f),
+            Faction.AiRival => new Color(0.6f, 0.5f, 0.85f, 0.9f),
+            _ => new Color(0.2f, 0.75f, 0.2f, 0.9f)
+        };
+        Color outlineColor = new Color(0, 0, 0, 0.8f);
+
+        int barWidth = 12;
+        int barHeight = 3;
+        int spacing = 1;
+
+        for (int i = 0; i < bars; i++)
+        {
+            int yOffset = i * (barHeight + spacing);
+            var bar = new Sprite2D();
+            var img = Image.CreateEmpty(barWidth + 2, barHeight + 2, false, Image.Format.Rgba8);
+            img.Fill(new Color(0, 0, 0, 0));
+
+            // Draw outline
+            for (int x = 0; x < barWidth + 2; x++)
+            {
+                img.SetPixel(x, 0, outlineColor);
+                img.SetPixel(x, barHeight + 1, outlineColor);
+            }
+            for (int y = 0; y < barHeight + 2; y++)
+            {
+                img.SetPixel(0, y, outlineColor);
+                img.SetPixel(barWidth + 1, y, outlineColor);
+            }
+
+            // Fill bar
+            for (int y = 1; y <= barHeight; y++)
+            {
+                for (int x = 1; x <= barWidth; x++)
+                {
+                    img.SetPixel(x, y, barColor);
+                }
+            }
+
+            bar.Texture = ImageTexture.CreateFromImage(img);
+            bar.Position = new Vector2(0, yOffset);
+            container.AddChild(bar);
+        }
+
+        // Add count label if many units
+        if (count > 3)
+        {
+            var label = new Label
+            {
+                Text = count.ToString(),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Position = new Vector2(barWidth + 4, -4)
+            };
+            label.AddThemeFontSizeOverride("font_size", 10);
+            label.AddThemeColorOverride("font_color", barColor);
+            label.AddThemeColorOverride("font_outline_color", outlineColor);
+            label.AddThemeConstantOverride("outline_size", 2);
+            container.AddChild(label);
+        }
+
+        return container;
     }
 
     private Texture2D GetOrCreateUnitTexture(UnitType type)

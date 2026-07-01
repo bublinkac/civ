@@ -29,22 +29,12 @@ public partial class MapRenderer : TileMapLayer
     private PollutionRenderer? _pollutionRenderer;
     private CityDetailPanel? _cityDetail; 
     private AdvisorsMenu? _advisorsMenu;
-    private TechTreePanel? _techTreePanel;
-    private DomesticAdvisorPanel? _domesticAdvisorPanel;
-    private MilitaryAdvisorPanel? _militaryAdvisorPanel;
-    private ForeignAdvisorPanel? _foreignAdvisorPanel;
-    private CulturalAdvisorPanel? _culturalAdvisorPanel;
-    private TradeAdvisorPanel? _tradeAdvisorPanel;
+    private AdvisorScreen? _advisorScreen;
     private GovernmentPanel? _governmentPanel;
     private HistographPanel? _histographPanel;
     private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) || 
                                        GodotObject.IsInstanceValid(_advisorsMenu) || 
-                                       GodotObject.IsInstanceValid(_techTreePanel) || 
-                                       GodotObject.IsInstanceValid(_domesticAdvisorPanel) ||
-                                       GodotObject.IsInstanceValid(_militaryAdvisorPanel) ||
-                                       GodotObject.IsInstanceValid(_foreignAdvisorPanel) ||
-                                       GodotObject.IsInstanceValid(_culturalAdvisorPanel) ||
-                                       GodotObject.IsInstanceValid(_tradeAdvisorPanel) ||
+                                       GodotObject.IsInstanceValid(_advisorScreen) ||
                                        GodotObject.IsInstanceValid(_governmentPanel) ||
                                        GodotObject.IsInstanceValid(_histographPanel);
 
@@ -91,69 +81,31 @@ public partial class MapRenderer : TileMapLayer
 
     public void OpenTechTree()
     {
-        if (GodotObject.IsInstanceValid(_techTreePanel)) _techTreePanel.QueueFree();
-        if (_sim == null) return;
-
-        _techTreePanel = new TechTreePanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_techTreePanel);
-        else AddChild(_techTreePanel);
+        OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Science);
     }
 
-    public void OpenDomesticAdvisor()
+    public void OpenAdvisorScreen(AdvisorScreen.AdvisorTab tab = AdvisorScreen.AdvisorTab.Domestic)
     {
-        if (GodotObject.IsInstanceValid(_domesticAdvisorPanel)) _domesticAdvisorPanel.QueueFree();
         if (_sim == null) return;
 
-        _domesticAdvisorPanel = new DomesticAdvisorPanel(_sim);
+        // If already open, just switch tab
+        if (GodotObject.IsInstanceValid(_advisorScreen))
+        {
+            _advisorScreen.SwitchTab(tab);
+            return;
+        }
+
+        _advisorScreen = new AdvisorScreen(_sim, tab);
         
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_domesticAdvisorPanel);
-        else AddChild(_domesticAdvisorPanel);
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_advisorScreen);
+        else AddChild(_advisorScreen);
     }
 
-    public void OpenMilitaryAdvisor()
-    {
-        if (GodotObject.IsInstanceValid(_militaryAdvisorPanel)) _militaryAdvisorPanel.QueueFree();
-        if (_sim == null) return;
-
-        _militaryAdvisorPanel = new MilitaryAdvisorPanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_militaryAdvisorPanel);
-        else AddChild(_militaryAdvisorPanel);
-    }
-
-    public void OpenForeignAdvisor()
-    {
-        if (GodotObject.IsInstanceValid(_foreignAdvisorPanel)) _foreignAdvisorPanel.QueueFree();
-        if (_sim == null) return;
-
-        _foreignAdvisorPanel = new ForeignAdvisorPanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_foreignAdvisorPanel);
-        else AddChild(_foreignAdvisorPanel);
-    }
-
-    public void OpenCulturalAdvisor()
-    {
-        if (GodotObject.IsInstanceValid(_culturalAdvisorPanel)) _culturalAdvisorPanel.QueueFree();
-        if (_sim == null) return;
-
-        _culturalAdvisorPanel = new CulturalAdvisorPanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_culturalAdvisorPanel);
-        else AddChild(_culturalAdvisorPanel);
-    }
-
-    public void OpenTradeAdvisor()
-    {
-        if (GodotObject.IsInstanceValid(_tradeAdvisorPanel)) _tradeAdvisorPanel.QueueFree();
-        if (_sim == null) return;
-
-        _tradeAdvisorPanel = new TradeAdvisorPanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_tradeAdvisorPanel);
-        else AddChild(_tradeAdvisorPanel);
-    }
+    public void OpenDomesticAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Domestic);
+    public void OpenTradeAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Trade);
+    public void OpenMilitaryAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Military);
+    public void OpenForeignAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Foreign);
+    public void OpenCulturalAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Cultural);
 
     public void OpenGovernment()
     {
@@ -760,8 +712,7 @@ public partial class MapRenderer : TileMapLayer
 
     private bool CheckIsFullScreenUiOpen() => GodotObject.IsInstanceValid(_cityDetail) || 
                                               GodotObject.IsInstanceValid(_advisorsMenu) || 
-                                              GodotObject.IsInstanceValid(_techTreePanel) || 
-                                              GodotObject.IsInstanceValid(_domesticAdvisorPanel);
+                                              GodotObject.IsInstanceValid(_advisorScreen);
 
     public override void _Process(double delta)
     {
@@ -835,60 +786,81 @@ public partial class MapRenderer : TileMapLayer
                     return;
                 }
                 
-                // Check for city first (cities take precedence)
-                City? clickedCity = null;
-                foreach (var city in _sim.Cities)
-                {
-                    if (city.X == clickedCell.X && city.Y == clickedCell.Y)
-                    {
-                        clickedCity = city;
-                        break;
-                    }
-                }
+                // Find city and all units on clicked tile
+                City? clickedCity = _sim.Cities.Find(c => c.X == clickedCell.X && c.Y == clickedCell.Y);
+                var unitsOnTile = _sim.Units.FindAll(u => u.X == clickedCell.X && u.Y == clickedCell.Y);
 
-                if (clickedCity != null)
+                // Double click on city always opens city detail
+                if (clickedCity != null && mouseButton.DoubleClick)
                 {
                     _selectedCityId = clickedCity.Id;
-                    _selectedUnitId = null; // Clear unit selection
-
-                    // --- NEW: Detect Double Click for City Detail ---
-                    if (mouseButton.DoubleClick)
+                    _selectedUnitId = null;
+                    GD.Print($"[Selection] Double click detected on city: {clickedCity.Name}");
+                    Callable.From(() => OpenCityDetail(clickedCity)).CallDeferred();
+                }
+                else if (clickedCity != null && unitsOnTile.Count > 0)
+                {
+                    // Shared tile: cycle city → unit1 → unit2 → ... → city
+                    if (_selectedCityId == clickedCity.Id)
                     {
-                        GD.Print($"[Selection] Double click detected on city: {clickedCity.Name}");
-                        // Use CallDeferred to ensure the panel is added safely outside the input event processing
-                        Callable.From(() => OpenCityDetail(clickedCity)).CallDeferred();
+                        // City selected → switch to first unit
+                        _selectedUnitId = unitsOnTile[0].Id;
+                        _selectedCityId = null;
+                        GD.Print($"[Selection] Unit: {unitsOnTile[0].Type} (1/{unitsOnTile.Count})");
+                    }
+                    else if (!string.IsNullOrEmpty(_selectedUnitId))
+                    {
+                        // A unit on this tile is selected → cycle to next unit or back to city
+                        int idx = unitsOnTile.FindIndex(u => u.Id == _selectedUnitId);
+                        if (idx >= 0 && idx < unitsOnTile.Count - 1)
+                        {
+                            _selectedUnitId = unitsOnTile[idx + 1].Id;
+                            _selectedCityId = null;
+                            GD.Print($"[Selection] Unit: {unitsOnTile[idx + 1].Type} ({idx + 2}/{unitsOnTile.Count})");
+                        }
+                        else
+                        {
+                            // Last unit → back to city
+                            _selectedCityId = clickedCity.Id;
+                            _selectedUnitId = null;
+                            GD.Print($"[Selection] City: {clickedCity.Name}");
+                        }
                     }
                     else
                     {
-                        GD.Print($"[Selection] City: {clickedCity.Name} | Position: ({clickedCity.X}, {clickedCity.Y}) | Yields: F:{clickedCity.StoredFood} P:{clickedCity.StoredProduction} C:{clickedCity.StoredCommerce}");
+                        // Nothing selected on this tile yet → select city first
+                        _selectedCityId = clickedCity.Id;
+                        _selectedUnitId = null;
+                        GD.Print($"[Selection] City: {clickedCity.Name}");
                     }
-                    // ------------------------------------------------
+                }
+                else if (clickedCity != null)
+                {
+                    _selectedCityId = clickedCity.Id;
+                    _selectedUnitId = null;
+                    GD.Print($"[Selection] City: {clickedCity.Name}");
+                }
+                else if (unitsOnTile.Count > 0)
+                {
+                    // No city: cycle through units on tile
+                    int idx = unitsOnTile.FindIndex(u => u.Id == _selectedUnitId);
+                    if (idx >= 0 && idx < unitsOnTile.Count - 1)
+                    {
+                        _selectedUnitId = unitsOnTile[idx + 1].Id;
+                        GD.Print($"[Selection] Unit: {unitsOnTile[idx + 1].Type} ({idx + 2}/{unitsOnTile.Count})");
+                    }
+                    else
+                    {
+                        _selectedUnitId = unitsOnTile[0].Id;
+                        GD.Print($"[Selection] Unit: {unitsOnTile[0].Type} (1/{unitsOnTile.Count})");
+                    }
+                    _selectedCityId = null;
                 }
                 else
                 {
-                    // Check for unit
-                    Unit? clickedUnit = null;
-                    foreach (var unit in _sim.Units)
-                    {
-                        if (unit.X == clickedCell.X && unit.Y == clickedCell.Y)
-                        {
-                            clickedUnit = unit;
-                            break;
-                        }
-                    }
-
-                    if (clickedUnit != null)
-                    {
-                        _selectedUnitId = clickedUnit.Id;
-                        _selectedCityId = null; // Clear city selection
-                        GD.Print($"[Selection] Unit: {clickedUnit.Type} | Position: ({clickedUnit.X}, {clickedUnit.Y}) | MP: {clickedUnit.RemainingMovement}/{clickedUnit.MaxMovement}");
-                    }
-                    else
-                    {
-                        _selectedUnitId = null;
-                        _selectedCityId = null;
-                        GD.Print("[Selection] Cleared selection.");
-                    }
+                    _selectedUnitId = null;
+                    _selectedCityId = null;
+                    GD.Print("[Selection] Cleared selection.");
                 }
 
                 _unitRenderer.UpdateUnits(_sim, _selectedUnitId);

@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using CivGame.Core;
 using System.Linq;
@@ -18,32 +19,43 @@ public partial class DomesticAdvisorPanel : PanelContainer
     private VBoxContainer _citiesList;
     private Label _advisorLabel;
 
-    public DomesticAdvisorPanel(GameSimulation sim)
+    public DomesticAdvisorPanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
         
-        SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        
-        // Parchment background
-        var bgStyle = new StyleBoxFlat {
-            BgColor = new Color(0.9f, 0.86f, 0.75f, 1.0f),
-            BorderWidthLeft = 4, BorderWidthTop = 4, BorderWidthRight = 4, BorderWidthBottom = 4,
-            BorderColor = new Color(0.6f, 0.55f, 0.4f, 1.0f)
-        };
-        AddThemeStyleboxOverride("panel", bgStyle);
+        if (!embedded)
+        {
+            SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            var bgStyle = new StyleBoxFlat {
+                BgColor = new Color(0.9f, 0.86f, 0.75f, 1.0f),
+                BorderWidthLeft = 4, BorderWidthTop = 4, BorderWidthRight = 4, BorderWidthBottom = 4,
+                BorderColor = new Color(0.6f, 0.55f, 0.4f, 1.0f)
+            };
+            AddThemeStyleboxOverride("panel", bgStyle);
+        }
+        else
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+            var transparentStyle = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
+            AddThemeStyleboxOverride("panel", transparentStyle);
+        }
 
         var mainVBox = new VBoxContainer();
         
-        // --- HEADER ---
-        var headerLabel = new Label { Text = "D O M E S T I C   A D V I S O R" };
-        headerLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
-        headerLabel.AddThemeFontSizeOverride("font_size", 32);
-        headerLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        var headerMargin = new MarginContainer();
-        headerMargin.AddThemeConstantOverride("margin_top", 10);
-        headerMargin.AddThemeConstantOverride("margin_bottom", 10);
-        headerMargin.AddChild(headerLabel);
-        mainVBox.AddChild(headerMargin);
+        if (!embedded)
+        {
+            // --- HEADER ---
+            var headerLabel = new Label { Text = "D O M E S T I C   A D V I S O R" };
+            headerLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.1f));
+            headerLabel.AddThemeFontSizeOverride("font_size", 32);
+            headerLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            var headerMargin = new MarginContainer();
+            headerMargin.AddThemeConstantOverride("margin_top", 10);
+            headerMargin.AddThemeConstantOverride("margin_bottom", 10);
+            headerMargin.AddChild(headerLabel);
+            mainVBox.AddChild(headerMargin);
+        }
 
         // --- TOP SECTION (Economy Overview) ---
         var topSectionHBox = new HBoxContainer();
@@ -235,21 +247,24 @@ public partial class DomesticAdvisorPanel : PanelContainer
         
         mainVBox.AddChild(citiesSplit);
         
-        // --- FOOTER ---
-        var footerMargin = new MarginContainer();
-        footerMargin.AddThemeConstantOverride("margin_top", 10);
-        footerMargin.AddThemeConstantOverride("margin_bottom", 10);
-        footerMargin.AddThemeConstantOverride("margin_right", 20);
-        
-        var closeBtn = new Button { Text = "Close Advisor" };
-        closeBtn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
-        closeBtn.CustomMinimumSize = new Vector2(150, 40);
-        var btnStyle = new StyleBoxFlat { BgColor = new Color(0.7f, 0.2f, 0.2f, 1.0f), CornerRadiusTopLeft = 5, CornerRadiusTopRight = 5, CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5 };
-        closeBtn.AddThemeStyleboxOverride("normal", btnStyle);
-        closeBtn.Pressed += () => QueueFree();
-        
-        footerMargin.AddChild(closeBtn);
-        mainVBox.AddChild(footerMargin);
+        if (!embedded)
+        {
+            // --- FOOTER ---
+            var footerMargin = new MarginContainer();
+            footerMargin.AddThemeConstantOverride("margin_top", 10);
+            footerMargin.AddThemeConstantOverride("margin_bottom", 10);
+            footerMargin.AddThemeConstantOverride("margin_right", 20);
+            
+            var closeBtn = new Button { Text = "Close Advisor" };
+            closeBtn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
+            closeBtn.CustomMinimumSize = new Vector2(150, 40);
+            var btnStyle = new StyleBoxFlat { BgColor = new Color(0.7f, 0.2f, 0.2f, 1.0f), CornerRadiusTopLeft = 5, CornerRadiusTopRight = 5, CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5 };
+            closeBtn.AddThemeStyleboxOverride("normal", btnStyle);
+            closeBtn.Pressed += () => QueueFree();
+            
+            footerMargin.AddChild(closeBtn);
+            mainVBox.AddChild(footerMargin);
+        }
 
         AddChild(mainVBox);
         
@@ -301,9 +316,10 @@ public partial class DomesticAdvisorPanel : PanelContainer
             var centerTile = _sim.Map.GetTile(city.X, city.Y);
             if (centerTile != null)
             {
-                food += centerTile.TotalYield.Food;
-                prod += centerTile.TotalYield.Production;
-                comm += centerTile.TotalYield.Commerce;
+                // Civ3: city center guarantees minimum 1 food, 1 shield, 1 commerce
+                food += Math.Max(1, centerTile.TotalYield.Food);
+                prod += Math.Max(1, centerTile.TotalYield.Production);
+                comm += Math.Max(1, centerTile.TotalYield.Commerce);
             }
             
             foreach (var tilePos in city.WorkedTiles)

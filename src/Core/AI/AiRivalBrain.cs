@@ -353,7 +353,7 @@ public static class AiRivalBrain
             for (int y = 2; y < sim.Map.Height - 2; y += 2)
             {
                 var tile = sim.Map.GetTile(x, y);
-                if (tile == null || tile.Terrain.Id == "ocean") continue;
+                if (tile == null || !tile.CanFoundCity) continue;
 
                 // Ensure distance is at least 4 from all existing cities
                 bool tooClose = false;
@@ -463,7 +463,7 @@ public static class AiRivalBrain
                 if (!sim.Map.IsInBounds(tx, ty)) continue;
 
                 var tile = sim.Map.GetTile(tx, ty);
-                if (tile == null || tile.Terrain.Id == "ocean") continue;
+                if (tile == null || !tile.IsLand) continue;
 
                 // Priority 1: Clean Pollution (Value 3)
                 if (tile.IsPolluted)
@@ -565,7 +565,7 @@ public static class AiRivalBrain
                     if (d < minExplorerDist)
                     {
                         var tile = sim.Map.GetTile(x, y);
-                        if (tile != null && tile.Terrain.Id != "ocean")
+                        if (tile != null && tile.IsLand)
                         {
                             minExplorerDist = d;
                             closestUnexploredX = x;
@@ -701,7 +701,7 @@ public static class AiRivalBrain
             if (sim.Map.IsInBounds(tx, ty))
             {
                 var tile = sim.Map.GetTile(tx, ty);
-                if (tile != null && tile.Terrain.Id != "ocean")
+                if (tile != null && tile.IsLand)
                 {
                     if (sim.CanMoveUnit(unit, tx, ty))
                     {

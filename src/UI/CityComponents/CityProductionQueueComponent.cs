@@ -55,9 +55,10 @@ public partial class CityProductionQueueComponent : PanelContainer
         var centerTile = sim.Map.GetTile(city.X, city.Y);
         if (centerTile != null)
         {
-            baseFood += centerTile.TotalYield.Food;
-            baseProd += centerTile.TotalYield.Production;
-            baseComm += centerTile.TotalYield.Commerce;
+            // Civ3: city center guarantees minimum 1 food, 1 shield, 1 commerce
+            baseFood += Math.Max(1, centerTile.TotalYield.Food);
+            baseProd += Math.Max(1, centerTile.TotalYield.Production);
+            baseComm += Math.Max(1, centerTile.TotalYield.Commerce);
         }
 
         // Surrounding worked tiles (match simulation logic: manual + auto-fill to population)

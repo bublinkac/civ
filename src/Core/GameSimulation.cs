@@ -177,7 +177,7 @@ public class GameSimulation
             if (distFromCenter < 8) continue; // Keep clear of starting area
 
             var tile = Map.GetTile(rx, ry);
-            if (tile != null && tile.Terrain.Id != "ocean")
+            if (tile != null && tile.IsLand)
             {
                 // Ensure no duplicates
                 if (!BarbarianCamps.Contains((rx, ry)))
@@ -255,7 +255,7 @@ public class GameSimulation
                     if (Map.IsInBounds(tx, ty))
                     {
                         var tile = Map.GetTile(tx, ty);
-                        if (tile != null && tile.Terrain.Id != "ocean")
+                        if (tile != null && tile.IsValidStartTile)
                         {
                             startX = tx;
                             startY = ty;
@@ -292,7 +292,7 @@ public class GameSimulation
                 if (Map.IsInBounds(tx, ty) && (tx != startX || ty != startY))
                 {
                     var tile = Map.GetTile(tx, ty);
-                    if (tile != null && tile.Terrain.Id != "ocean")
+                    if (tile != null && tile.IsValidStartTile)
                     {
                         settlerX = tx;
                         settlerY = ty;
@@ -346,7 +346,7 @@ public class GameSimulation
                     if (Map.IsInBounds(tx, ty))
                     {
                         var tile = Map.GetTile(tx, ty);
-                        if (tile != null && tile.Terrain.Id != "ocean")
+                        if (tile != null && tile.IsValidStartTile)
                         {
                             aiStartX = tx;
                             aiStartY = ty;
@@ -385,7 +385,7 @@ public class GameSimulation
                 if (Map.IsInBounds(tx, ty) && (tx != aiStartX || ty != aiStartY))
                 {
                     var tile = Map.GetTile(tx, ty);
-                    if (tile != null && tile.Terrain.Id != "ocean")
+                    if (tile != null && tile.IsValidStartTile)
                     {
                         aiSettlerX = tx;
                         aiSettlerY = ty;
@@ -427,9 +427,10 @@ public class GameSimulation
             }
         }
 
-        // 2. Apply active vision around all units
+        // 2. Apply active vision around player units only
         foreach (var unit in Units)
         {
+            if (unit.Faction != Faction.Player) continue;
             int r = unit.VisionRange;
             var tile = Map.GetTile(unit.X, unit.Y);
             if (tile != null && tile.Improvement != null && tile.Improvement.Id == "outpost")
@@ -451,9 +452,10 @@ public class GameSimulation
             }
         }
 
-        // 3. Apply active vision around all cities
+        // 3. Apply active vision around player cities only
         foreach (var city in Cities)
         {
+            if (city.Faction != Faction.Player) continue;
             int r = city.VisionRange;
             for (int dx = -r; dx <= r; dx++)
             {
@@ -474,9 +476,9 @@ public class GameSimulation
     {
         if (unit.Type != UnitType.Settler) return false;
 
-        // Cannot build city on ocean
+        // Civ3: can only found city on valid land (no water, mountains, volcanoes)
         var tile = Map.GetTile(unit.X, unit.Y);
-        if (tile == null || tile.Terrain.Id == "ocean") return false;
+        if (tile == null || !tile.CanFoundCity) return false;
 
         // Cannot build city if another city is already here
         if (Cities.Any(c => c.X == unit.X && c.Y == unit.Y)) return false;
@@ -531,7 +533,7 @@ public class GameSimulation
                 {
                     var tile = Map.GetTile(tx, ty);
                     // Cities only claim land tiles and unclaimed tiles
-                    if (tile != null && tile.Terrain.Id != "ocean")
+                    if (tile != null && tile.IsLand)
                     {
                         if (string.IsNullOrEmpty(tile.OwnerCityId))
                         {
@@ -663,16 +665,13 @@ public class GameSimulation
         // Land units cannot enter Ocean tiles
         var tile = Map.GetTile(targetX, targetY);
         if (tile == null) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileMissing);
-        if (tile.Terrain.Id == "ocean") return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+        if (tile.IsOcean) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
 
-        // Friendly units cannot stack on the same tile (Civ rule: 1 unit per tile of same owner category)
+        // Civ3: friendly units can stack on the same tile, only hostile units block
         var existingUnit = Units.Find(u => u.X == targetX && u.Y == targetY);
-        if (existingUnit != null)
+        if (existingUnit != null && IsHostile(unit, existingUnit))
         {
-            if (!IsHostile(unit, existingUnit))
-            {
-                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
-            }
+            // Hostile unit on target — this is an attack, which is allowed
         }
 
         return MoveValidationResult.Valid();
@@ -1134,7 +1133,7 @@ public class GameSimulation
             for (int y = 0; y < Map.Height; y++)
             {
                 var tile = Map.GetTile(x, y);
-                if (tile == null || tile.IsOcean) continue;
+                if (tile == null || !tile.IsLand) continue;
                 totalLandTiles++;
                 if (!string.IsNullOrEmpty(tile.OwnerCityId))
                 {
@@ -1154,7 +1153,7 @@ public class GameSimulation
             for (int y = 0; y < Map.Height; y++)
             {
                 var tile = Map.GetTile(x, y);
-                if (tile == null || tile.IsOcean) continue;
+                if (tile == null || !tile.IsLand) continue;
                 if (!string.IsNullOrEmpty(tile.OwnerCityId))
                 {
                     var ownerCity = Cities.Find(c => c.Id == tile.OwnerCityId);
@@ -1515,7 +1514,7 @@ public class GameSimulation
 
                 if (!Map.IsInBounds(nx, ny)) continue;
                 var tile = Map.GetTile(nx, ny);
-                if (tile == null || tile.Terrain.Id == "ocean") continue;
+                if (tile == null || tile.IsOcean) continue;
 
                 float moveCost = GetTileMovementCostForUnit(tile, unit);
                 float remaining = Math.Max(0.0f, mp - moveCost);
@@ -2152,6 +2151,11 @@ public class GameSimulation
                 {
                     centerCommerce += 1;
                 }
+
+                // Civ3: city center guarantees minimum 1 food, 1 shield, 1 commerce
+                if (centerFood < 1) centerFood = 1;
+                if (centerProduction < 1) centerProduction = 1;
+                if (centerCommerce < 1) centerCommerce = 1;
 
                 food += centerFood;
                 production += centerProduction;

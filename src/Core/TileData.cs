@@ -65,7 +65,23 @@ public class TileData
     public TileImprovement? Improvement { get; set; }
 
     /// <summary>True for Ocean, Sea and Coast tiles — not counted as land for Domination.</summary>
-    public bool IsOcean => Terrain.Id == "ocean" || Terrain.Id == "sea" || Terrain.Id == "coast";
+    public bool IsOcean => Terrain.Id is "ocean" or "sea" or "coast";
+
+    /// <summary>True for any land tile where a land unit can exist (includes mountains/volcano).</summary>
+    public bool IsLand => Terrain.Id is "grassland" or "plains" or "desert" or "tundra"
+                                     or "floodplains" or "hills" or "forest" or "jungle"
+                                     or "marsh" or "mountain" or "volcano";
+
+    /// <summary>
+    /// True if a Settler can found a city here — Civ3 rules:
+    /// Mountains, Volcanoes and all water tiles are excluded.
+    /// </summary>
+    public bool CanFoundCity => Terrain.Id is "grassland" or "plains" or "desert" or "tundra"
+                                             or "floodplains" or "hills" or "forest" or "jungle"
+                                             or "marsh";
+
+    /// <summary>True if this tile is suitable for spawning a starting Settler (same as CanFoundCity).</summary>
+    public bool IsValidStartTile => CanFoundCity;
 
 
     public TileYield BaseYield => Terrain.BaseYield;

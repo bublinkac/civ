@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using CivGame.Core;
 using System.Linq;
@@ -90,7 +91,7 @@ public partial class CityEconomyModuleComponent : PanelContainer
         // Gather base production
         int baseProd = 0;
         var centerTile = sim.Map.GetTile(city.X, city.Y);
-        if (centerTile != null) baseProd += centerTile.TotalYield.Production;
+        if (centerTile != null) baseProd += Math.Max(1, centerTile.TotalYield.Production);
         foreach (var tilePos in city.WorkedTiles)
         {
             var t = sim.Map.GetTile(tilePos.X, tilePos.Y);

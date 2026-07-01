@@ -19,24 +19,32 @@ public partial class MilitaryAdvisorPanel : PanelContainer
     private Button _viewByCityBtn;
     private bool _viewByCity = false;
 
-    public MilitaryAdvisorPanel(GameSimulation sim)
+    public MilitaryAdvisorPanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
         Name = "MilitaryAdvisorPanel";
 
-        SetAnchorsPreset(LayoutPreset.FullRect);
-        MouseFilter = MouseFilterEnum.Stop;
-
-        // Civ3 parchment background
-        var styleBox = new StyleBoxFlat
+        if (!embedded)
         {
-            BgColor = new Color(0.91f, 0.87f, 0.78f, 1.0f),
-            BorderWidthTop = 5, BorderWidthBottom = 5, BorderWidthLeft = 5, BorderWidthRight = 5,
-            BorderColor = new Color(0.55f, 0.4f, 0.25f),
-            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
-            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
-        };
-        AddThemeStyleboxOverride("panel", styleBox);
+            SetAnchorsPreset(LayoutPreset.FullRect);
+            MouseFilter = MouseFilterEnum.Stop;
+            var styleBox = new StyleBoxFlat
+            {
+                BgColor = new Color(0.91f, 0.87f, 0.78f, 1.0f),
+                BorderWidthTop = 5, BorderWidthBottom = 5, BorderWidthLeft = 5, BorderWidthRight = 5,
+                BorderColor = new Color(0.55f, 0.4f, 0.25f),
+                CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+                CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
+            };
+            AddThemeStyleboxOverride("panel", styleBox);
+        }
+        else
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            var transparentStyle = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
+            AddThemeStyleboxOverride("panel", transparentStyle);
+        }
 
         var outerMargin = new MarginContainer();
         outerMargin.AddThemeConstantOverride("margin_top", 12);
@@ -49,35 +57,36 @@ public partial class MilitaryAdvisorPanel : PanelContainer
         var mainVBox = new VBoxContainer();
         mainVBox.AddThemeConstantOverride("separation", 8);
 
-        // ═══════════════════════════════════════════════
-        // HEADER BAR
-        // ═══════════════════════════════════════════════
-        var headerPanel = new PanelContainer();
-        var headerStyle = new StyleBoxFlat
+        if (!embedded)
         {
-            BgColor = new Color(0.45f, 0.2f, 0.15f),
-            ContentMarginLeft = 10, ContentMarginRight = 10, ContentMarginTop = 6, ContentMarginBottom = 6
-        };
-        headerPanel.AddThemeStyleboxOverride("panel", headerStyle);
-        var headerHBox = new HBoxContainer();
-        var titleLabel = new Label
-        {
-            Text = "M I L I T A R Y   A D V I S O R",
-            HorizontalAlignment = HorizontalAlignment.Center,
-            SizeFlagsHorizontal = SizeFlags.ExpandFill
-        };
-        titleLabel.AddThemeFontSizeOverride("font_size", 24);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.9f, 0.75f));
+            // HEADER BAR
+            var headerPanel = new PanelContainer();
+            var headerStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0.45f, 0.2f, 0.15f),
+                ContentMarginLeft = 10, ContentMarginRight = 10, ContentMarginTop = 6, ContentMarginBottom = 6
+            };
+            headerPanel.AddThemeStyleboxOverride("panel", headerStyle);
+            var headerHBox = new HBoxContainer();
+            var titleLabel = new Label
+            {
+                Text = "M I L I T A R Y   A D V I S O R",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill
+            };
+            titleLabel.AddThemeFontSizeOverride("font_size", 24);
+            titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.9f, 0.75f));
 
-        var closeBtn = new Button { Text = "\u2716", Flat = true, CustomMinimumSize = new Vector2(36, 36) };
-        closeBtn.AddThemeColorOverride("font_color", new Color(0.95f, 0.8f, 0.6f));
-        closeBtn.AddThemeFontSizeOverride("font_size", 20);
-        closeBtn.Pressed += () => QueueFree();
+            var closeBtn = new Button { Text = "\u2716", Flat = true, CustomMinimumSize = new Vector2(36, 36) };
+            closeBtn.AddThemeColorOverride("font_color", new Color(0.95f, 0.8f, 0.6f));
+            closeBtn.AddThemeFontSizeOverride("font_size", 20);
+            closeBtn.Pressed += () => QueueFree();
 
-        headerHBox.AddChild(titleLabel);
-        headerHBox.AddChild(closeBtn);
-        headerPanel.AddChild(headerHBox);
-        mainVBox.AddChild(headerPanel);
+            headerHBox.AddChild(titleLabel);
+            headerHBox.AddChild(closeBtn);
+            headerPanel.AddChild(headerHBox);
+            mainVBox.AddChild(headerPanel);
+        }
 
         // ═══════════════════════════════════════════════
         // ADVISOR ROW: portrait + speech + stats

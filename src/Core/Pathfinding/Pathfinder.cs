@@ -47,7 +47,7 @@ public class Pathfinder
 
         // Target tile validation (land units cannot enter ocean)
         var targetTile = _map.GetTile(targetX, targetY);
-        if (targetTile == null || targetTile.Terrain.Id == "ocean") return null;
+        if (targetTile == null || targetTile.IsOcean) return null;
 
         // Reset search states for the search space (only reset the touched elements if possible, 
         // but for safety and fast flat arrays, resetting arrays is extremely fast in C#)
@@ -104,7 +104,7 @@ public class Pathfinder
                 if (_closedSet[neighborIndex]) continue;
 
                 var neighborTile = _map.GetTile(nx, ny);
-                if (neighborTile == null || neighborTile.Terrain.Id == "ocean") continue;
+                if (neighborTile == null || neighborTile.IsOcean) continue;
 
                 // Friendly and Hostile units check (except target tile which we can select to attack)
                 if (!ignoreUnits && (nx != targetX || ny != targetY))
