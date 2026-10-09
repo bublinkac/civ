@@ -673,8 +673,26 @@ public partial class GameHud : CanvasLayer
                 else if (unit.IsFortified) statusStr = " | Status: FORTIFIED (+25% Defense)";
                 else if (unit.Type == UnitType.Worker && unit.IsWorkerBuilding()) statusStr = $" | Status: CONSTRUCTING {unit.ImprovementUnderConstruction!.Name.ToUpper()} ({unit.ConstructionTurnsRemaining} turns left)";
 
-                string details = $"[UNIT] {unit.Type.ToString().ToUpper()}{factionStr}\n" +
-                                 $"Position: ({unit.X}, {unit.Y}) | Health: {unit.Health}/{unit.MaxHealth} | MP: {unit.RemainingMovement}/{unit.MaxMovement}{statusStr}";
+                string cargoStr = "";
+                if (unit.TransportCapacity > 0)
+                {
+                    cargoStr = $" | Cargo: {unit.LoadedUnitIds.Count}/{unit.TransportCapacity}";
+                }
+                else if (unit.OperationalRange > 0)
+                {
+                    cargoStr = $" | Range: {unit.OperationalRange}";
+                }
+                if (unit.BombardStrength > 0)
+                {
+                    cargoStr += $" | Bombard: {unit.BombardStrength} (R:{unit.BombardRange})";
+                }
+                if (unit.IsStealth)
+                {
+                    cargoStr += " | [STEALTH]";
+                }
+
+                string details = $"[UNIT] {unit.Type.ToString().ToUpper()}{factionStr} ({unit.Domain})\n" +
+                                 $"Position: ({unit.X}, {unit.Y}) | Health: {unit.Health}/{unit.MaxHealth} | MP: {unit.RemainingMovement}/{unit.MaxMovement}{cargoStr}{statusStr}";
 
                 var tile = sim.Map.GetTile(unit.X, unit.Y);
                 if (tile != null)
@@ -752,6 +770,44 @@ public partial class GameHud : CanvasLayer
                                         }
                                     }
                                 }
+                            }
+
+                            // Naval Transport Disembark
+                            if (unit.TransportCapacity > 0 && unit.LoadedUnitIds.Count > 0 && unit.HasMovementRemaining())
+                            {
+                                var disembarkBtn = CreateActionButton("⛵", "Disembark", "U", () => OnActionTriggered?.Invoke("disembark"), new Color(0.12f, 0.35f, 0.45f));
+                                _actionsBox.AddChild(disembarkBtn);
+                            }
+
+                            // Land unit Board Transport
+                            if (unit.Domain == UnitDomain.Land && unit.HasMovementRemaining())
+                            {
+                                var adjTransport = sim.Units.Find(u => u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit) && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 1);
+                                if (adjTransport != null)
+                                {
+                                    var boardBtn = CreateActionButton("🚢", "Board Ship", "L", () => OnActionTriggered?.Invoke("board"), new Color(0.12f, 0.35f, 0.45f));
+                                    _actionsBox.AddChild(boardBtn);
+                                }
+                            }
+
+                            // Bombardment (Artillery & Naval)
+                            if (unit.BombardRange > 0 && unit.Domain != UnitDomain.Air && unit.HasMovementRemaining())
+                            {
+                                var bombardBtn = CreateActionButton("💥", "Bombard", "B", () => OnActionTriggered?.Invoke("bombard"), new Color(0.55f, 0.25f, 0.1f));
+                                _actionsBox.AddChild(bombardBtn);
+                            }
+
+                            // Air missions
+                            if (unit.Domain == UnitDomain.Air && unit.HasMovementRemaining())
+                            {
+                                var airStrikeBtn = CreateActionButton("🎯", "Air Strike", "A", () => OnActionTriggered?.Invoke("air_strike"), new Color(0.6f, 0.15f, 0.15f));
+                                _actionsBox.AddChild(airStrikeBtn);
+
+                                var reconBtn = CreateActionButton("🔭", "Air Recon", "R", () => OnActionTriggered?.Invoke("air_recon"), new Color(0.2f, 0.35f, 0.5f));
+                                _actionsBox.AddChild(reconBtn);
+
+                                var rebaseBtn = CreateActionButton("🛬", "Re-base", "E", () => OnActionTriggered?.Invoke("air_rebase"), new Color(0.3f, 0.25f, 0.45f));
+                                _actionsBox.AddChild(rebaseBtn);
                             }
 
                             // Standard actions for all awake units (Fortify & Sleep)

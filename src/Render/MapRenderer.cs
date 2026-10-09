@@ -1286,6 +1286,163 @@ public partial class MapRenderer : TileMapLayer
                 }
                 break;
 
+            case "disembark":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.LoadedUnitIds.Count > 0)
+                    {
+                        var cargoId = selectedUnit.LoadedUnitIds.First();
+                        var cargo = _sim.Units.Find(u => u.Id == cargoId);
+                        if (cargo != null)
+                        {
+                            int[] dxs = { 0, 1, 0, -1, 1, -1, 1, -1 };
+                            int[] dys = { 1, 0, -1, 0, 1, 1, -1, -1 };
+                            for (int i = 0; i < 8; i++)
+                            {
+                                int tx = selectedUnit.X + dxs[i];
+                                int ty = selectedUnit.Y + dys[i];
+                                if (_sim.Map.IsInBounds(tx, ty))
+                                {
+                                    var t = _sim.Map.GetTile(tx, ty);
+                                    if (t != null && t.IsLand)
+                                    {
+                                        if (_sim.UnloadUnitFromTransport(cargo, tx, ty))
+                                        {
+                                            GD.Print($"[Transport] {cargo.Type} disembarked at ({tx}, {ty})!");
+                                            _selectedUnitId = cargo.Id;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            UpdateUiAfterAction();
+                        }
+                    }
+                }
+                break;
+
+            case "board":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Land)
+                    {
+                        var transport = _sim.Units.Find(u => u.Faction == selectedUnit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(selectedUnit) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= 1);
+                        if (transport != null)
+                        {
+                            if (_sim.LoadUnitIntoTransport(selectedUnit, transport))
+                            {
+                                GD.Print($"[Transport] {selectedUnit.Type} boarded {transport.Type}!");
+                                _selectedUnitId = transport.Id;
+                                UpdateUiAfterAction();
+                            }
+                        }
+                    }
+                }
+                break;
+
+            case "bombard":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.BombardRange > 0 && selectedUnit.HasMovementRemaining())
+                    {
+                        Unit? bestTarget = null;
+                        int bestDef = -1;
+                        for (int dx = -selectedUnit.BombardRange; dx <= selectedUnit.BombardRange; dx++)
+                        {
+                            for (int dy = -selectedUnit.BombardRange; dy <= selectedUnit.BombardRange; dy++)
+                            {
+                                int tx = selectedUnit.X + dx;
+                                int ty = selectedUnit.Y + dy;
+                                if (Math.Max(Math.Abs(dx), Math.Abs(dy)) <= selectedUnit.BombardRange && Math.Max(Math.Abs(dx), Math.Abs(dy)) > 0 && _sim.Map.IsInBounds(tx, ty))
+                                {
+                                    var enemy = _sim.Units.FirstOrDefault(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && _sim.IsHostile(selectedUnit, u));
+                                    if (enemy != null && (int)enemy.DefenseStrength > bestDef)
+                                    {
+                                        bestDef = (int)enemy.DefenseStrength;
+                                        bestTarget = enemy;
+                                    }
+                                }
+                            }
+                        }
+                        if (bestTarget != null)
+                        {
+                            _sim.ExecuteBombard(selectedUnit, bestTarget.X, bestTarget.Y);
+                            GD.Print($"[Bombard] {selectedUnit.Type} bombarded {bestTarget.Type} at ({bestTarget.X}, {bestTarget.Y})!");
+                        }
+                        else
+                        {
+                            var enemyCity = _sim.Cities.FirstOrDefault(c => c.Faction != selectedUnit.Faction && _sim.IsHostileToFaction(selectedUnit.Faction, c.Faction) && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.BombardRange);
+                            if (enemyCity != null)
+                            {
+                                _sim.ExecuteBombard(selectedUnit, enemyCity.X, enemyCity.Y);
+                                GD.Print($"[Bombard] {selectedUnit.Type} bombarded {enemyCity.Name} at ({enemyCity.X}, {enemyCity.Y})!");
+                            }
+                        }
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
+            case "air_strike":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    {
+                        Unit? airTarget = _sim.Units.FirstOrDefault(u => u.TransportUnitId == null && _sim.IsHostile(selectedUnit, u) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange);
+                        if (airTarget != null)
+                        {
+                            _sim.ExecuteAirStrike(selectedUnit, airTarget.X, airTarget.Y);
+                            GD.Print($"[Air Strike] {selectedUnit.Type} struck {airTarget.Type} at ({airTarget.X}, {airTarget.Y})!");
+                        }
+                        else
+                        {
+                            var enemyCity = _sim.Cities.FirstOrDefault(c => c.Faction != selectedUnit.Faction && _sim.IsHostileToFaction(selectedUnit.Faction, c.Faction) && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange);
+                            if (enemyCity != null)
+                            {
+                                _sim.ExecuteAirStrike(selectedUnit, enemyCity.X, enemyCity.Y);
+                                GD.Print($"[Air Strike] {selectedUnit.Type} struck {enemyCity.Name} at ({enemyCity.X}, {enemyCity.Y})!");
+                            }
+                        }
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
+            case "air_recon":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    {
+                        int rx = Math.Clamp(selectedUnit.X + selectedUnit.OperationalRange / 2, 0, _sim.Map.Width - 1);
+                        int ry = Math.Clamp(selectedUnit.Y, 0, _sim.Map.Height - 1);
+                        _sim.ExecuteAirRecon(selectedUnit, rx, ry);
+                        _fogRenderer.UpdateFog(_sim);
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
+            case "air_rebase":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    {
+                        var targetBase = _sim.Cities.FirstOrDefault(c => (c.X != selectedUnit.X || c.Y != selectedUnit.Y) && c.Faction == selectedUnit.Faction && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange * 2);
+                        if (targetBase != null)
+                        {
+                            _sim.ExecuteAirRebase(selectedUnit, targetBase.X, targetBase.Y);
+                        }
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
             case "cycle_production":
                 if (!string.IsNullOrEmpty(_selectedCityId))
                 {

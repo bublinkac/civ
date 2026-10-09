@@ -1,5 +1,6 @@
 using Godot;
 using CivGame.Core;
+using CivGame.Render;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -541,37 +542,40 @@ public partial class CityProductionQueueComponent : PanelContainer
 
     internal static Texture2D? GetProjectTexture(ProductionProject proj)
     {
-        string? baseName = proj switch
+        string? baseName = null;
+        if (UnitDefinitionRegistry.TryMapProjectToUnitType(proj, out var unitType))
         {
-            ProductionProject.Explorer => "explorer",
-            ProductionProject.Settler => "settler",
-            ProductionProject.Worker => "worker",
-            ProductionProject.Warrior => "warrior",
-            ProductionProject.Archer => "archer",
-            _ => null
-        };
+            baseName = UnitRenderer.GetUnitAssetBaseName(unitType);
+        }
 
         if (baseName == null) return null;
 
         // Try to load original webp first, then fallback to png
         string origPath = $"res://assets/{baseName}_orig.webp";
-        if (ResourceLoader.Exists(origPath))
+        if (FileAccess.FileExists(origPath))
         {
             try
             {
-                var tex = GD.Load<Texture2D>(origPath);
-                if (tex != null) return tex;
+                var img = Image.LoadFromFile(origPath);
+                if (img != null && !img.IsEmpty())
+                {
+                    img.Convert(Image.Format.Rgba8);
+                    return ImageTexture.CreateFromImage(img);
+                }
             }
             catch {}
         }
 
         string pngPath = $"res://assets/{baseName}.png";
-        if (ResourceLoader.Exists(pngPath))
+        if (FileAccess.FileExists(pngPath))
         {
             try
             {
-                var tex = GD.Load<Texture2D>(pngPath);
-                if (tex != null) return tex;
+                var img = Image.LoadFromFile(pngPath);
+                if (img != null && !img.IsEmpty())
+                {
+                    return ImageTexture.CreateFromImage(img);
+                }
             }
             catch {}
         }

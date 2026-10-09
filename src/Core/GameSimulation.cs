@@ -662,16 +662,52 @@ public class GameSimulation
         // Check if unit has any movement points left
         if (!unit.HasMovementRemaining()) return MoveValidationResult.Invalid(MoveValidationFailureReason.NoMovementRemaining);
 
-        // Land units cannot enter Ocean tiles
         var tile = Map.GetTile(targetX, targetY);
         if (tile == null) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileMissing);
-        if (tile.IsOcean) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
 
-        // Civ3: friendly units can stack on the same tile, only hostile units block
-        var existingUnit = Units.Find(u => u.X == targetX && u.Y == targetY);
+        // 1. Air Domain: cannot use regular step-by-step movement (use Rebase, Air Strike, Recon)
+        if (unit.Domain == UnitDomain.Air)
+        {
+            return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+        }
+
+        // 2. Sea Domain: can only enter water tiles (Coast, Sea, Ocean) OR friendly coastal cities (ports)
+        if (unit.Domain == UnitDomain.Sea)
+        {
+            bool isWater = tile.IsOcean;
+            bool isFriendlyPort = Cities.Any(c => c.X == targetX && c.Y == targetY && c.Faction == unit.Faction && c.IsCoastal(Map));
+            if (!isWater && !isFriendlyPort)
+            {
+                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+            }
+        }
+
+        // 3. Land Domain: can enter land tiles, OR enter water tile if boarding a friendly transport
+        if (unit.Domain == UnitDomain.Land)
+        {
+            if (tile.IsOcean)
+            {
+                bool canBoard = Units.Any(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+                if (!canBoard)
+                {
+                    return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+                }
+            }
+        }
+
+        // Check hostile units on target tile
+        var existingUnit = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null);
         if (existingUnit != null && IsHostile(unit, existingUnit))
         {
-            // Hostile unit on target — this is an attack, which is allowed
+            // Domain combat restrictions: sea units cannot melee land units on land; land cannot melee sea units in ocean
+            if (unit.Domain == UnitDomain.Sea && existingUnit.Domain == UnitDomain.Land && !tile.IsOcean)
+            {
+                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+            }
+            if (unit.Domain == UnitDomain.Land && existingUnit.Domain == UnitDomain.Sea && tile.IsOcean)
+            {
+                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+            }
         }
 
         return MoveValidationResult.Valid();
@@ -683,8 +719,22 @@ public class GameSimulation
 
         var tile = Map.GetTile(targetX, targetY)!;
 
+        // Check if land unit is boarding a friendly transport in water
+        if (unit.Domain == UnitDomain.Land && tile.IsOcean)
+        {
+            var transport = Units.Find(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+            if (transport != null)
+            {
+                unit.BoardTransport(transport);
+                unit.RemainingMovement = 0;
+                Console.WriteLine($"[Transport] {unit.Type} boarded {transport.Type} at ({targetX}, {targetY})!");
+                UpdateVisibility();
+                return true;
+            }
+        }
+
         // Check if there is an enemy unit on the target tile
-        var enemyUnit = Units.Find(u => u.X == targetX && u.Y == targetY);
+        var enemyUnit = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null);
         if (enemyUnit != null && IsHostile(unit, enemyUnit))
         {
             // Trigger Combat!
@@ -707,6 +757,20 @@ public class GameSimulation
         // Normal movement
         float moveCost = GetTileMovementCostForUnit(tile, unit);
         unit.MoveTo(targetX, targetY, moveCost);
+
+        // Synchronize cargo positions with transport
+        if (unit.LoadedUnitIds.Count > 0)
+        {
+            foreach (var loadedId in unit.LoadedUnitIds)
+            {
+                var loadedUnit = Units.Find(u => u.Id == loadedId);
+                if (loadedUnit != null)
+                {
+                    loadedUnit.X = targetX;
+                    loadedUnit.Y = targetY;
+                }
+            }
+        }
         
         // Check for city capture on normal move into undefended city
         CheckCityCapture(unit, targetX, targetY);
@@ -861,7 +925,7 @@ public class GameSimulation
         if (defenderDied)
         {
             Console.WriteLine($"[Combat] {defender.Type} has been destroyed!");
-            Units.Remove(defender);
+            DestroyUnit(defender);
 
             // War weariness: +2 when losing a unit
             if (defender.Faction == Faction.Player)
@@ -873,6 +937,21 @@ public class GameSimulation
                 var tile = Map.GetTile(defender.X, defender.Y)!;
                 float moveCost = GetTileMovementCostForUnit(tile, attacker);
                 attacker.MoveTo(defender.X, defender.Y, moveCost);
+                
+                // Synchronize cargo positions if attacker is a transport
+                if (attacker.LoadedUnitIds.Count > 0)
+                {
+                    foreach (var cargoId in attacker.LoadedUnitIds)
+                    {
+                        var cargo = Units.Find(u => u.Id == cargoId);
+                        if (cargo != null)
+                        {
+                            cargo.X = defender.X;
+                            cargo.Y = defender.Y;
+                        }
+                    }
+                }
+
                 Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
                 
                 FactionsWithVictoriousUnit.Add(attacker.Faction);
@@ -885,7 +964,7 @@ public class GameSimulation
         if (attackerDied)
         {
             Console.WriteLine($"[Combat] {attacker.Type} has been destroyed in battle!");
-            Units.Remove(attacker);
+            DestroyUnit(attacker);
 
             // War weariness: +2 when losing a unit
             if (attacker.Faction == Faction.Player)
@@ -906,6 +985,284 @@ public class GameSimulation
         {
             attacker.RemainingMovement = 0;
         }
+    }
+
+    public void DestroyUnit(Unit unit)
+    {
+        if (unit.LoadedUnitIds.Count > 0)
+        {
+            var cargoUnits = Units.Where(u => unit.LoadedUnitIds.Contains(u.Id)).ToList();
+            foreach (var cargo in cargoUnits)
+            {
+                Console.WriteLine($"[Transport] Cargo {cargo.Type} sank or was destroyed aboard {unit.Type}!");
+                Units.Remove(cargo);
+            }
+            unit.LoadedUnitIds.Clear();
+        }
+
+        // If this unit was cargo inside another transport, remove it from the transport's loaded list
+        if (unit.TransportUnitId != null)
+        {
+            var transport = Units.Find(u => u.Id == unit.TransportUnitId);
+            transport?.LoadedUnitIds.Remove(unit.Id);
+            unit.TransportUnitId = null;
+        }
+
+        Units.Remove(unit);
+    }
+
+    public bool IsHostileToFaction(Faction a, Faction b)
+    {
+        if (a == b) return false;
+        if (a == Faction.Barbarian || b == Faction.Barbarian) return true;
+        return IsAtWarWithAi;
+    }
+
+    public bool LoadUnitIntoTransport(Unit cargo, Unit transport)
+    {
+        if (!cargo.CanBoardTransport(transport)) return false;
+        int dx = Math.Abs(cargo.X - transport.X);
+        int dy = Math.Abs(cargo.Y - transport.Y);
+        if (dx > 1 || dy > 1) return false;
+
+        cargo.BoardTransport(transport);
+        cargo.RemainingMovement = 0;
+        UpdateVisibility();
+        return true;
+    }
+
+    public bool UnloadUnitFromTransport(Unit cargo, int targetX, int targetY)
+    {
+        if (cargo.TransportUnitId == null) return false;
+        var transport = Units.Find(u => u.Id == cargo.TransportUnitId);
+        if (transport == null) return false;
+
+        if (!Map.IsInBounds(targetX, targetY)) return false;
+        int dx = Math.Abs(targetX - transport.X);
+        int dy = Math.Abs(targetY - transport.Y);
+        if (dx > 1 || dy > 1) return false;
+
+        var targetTile = Map.GetTile(targetX, targetY);
+        if (targetTile == null || !targetTile.IsLand) return false;
+
+        cargo.Disembark(targetX, targetY);
+        cargo.RemainingMovement = 0;
+        UpdateVisibility();
+        return true;
+    }
+
+    public void CheckNavalSinkingAtTurnEnd()
+    {
+        var vulnerableShips = Units.Where(u => u.SinksInSeaOcean).ToList();
+        foreach (var ship in vulnerableShips)
+        {
+            var tile = Map.GetTile(ship.X, ship.Y);
+            if (tile == null) continue;
+
+            bool isSea = tile.Terrain.Id == "sea";
+            bool isOcean = tile.Terrain.Id == "ocean";
+
+            if (isSea || isOcean)
+            {
+                bool isSeafaring = ship.Civilization != null &&
+                    (ship.Civilization.Trait1 == CivTrait.Seafaring || ship.Civilization.Trait2 == CivTrait.Seafaring);
+
+                int sinkChance = isOcean ? (isSeafaring ? 35 : 60) : (isSeafaring ? 15 : 35);
+                if (Random.Shared.Next(100) < sinkChance)
+                {
+                    Console.WriteLine($"[Naval Sinking] {ship.Type} ({ship.Faction}) sank in treacherous waters of {tile.Terrain.Name} at ({ship.X}, {ship.Y})!");
+                    DestroyUnit(ship);
+                }
+            }
+        }
+    }
+
+    public bool ExecuteBombard(Unit unit, int targetX, int targetY)
+    {
+        if (unit.BombardRange <= 0 || !unit.HasMovementRemaining()) return false;
+        if (!Map.IsInBounds(targetX, targetY)) return false;
+
+        int dist = Math.Max(Math.Abs(targetX - unit.X), Math.Abs(targetY - unit.Y));
+        if (dist > unit.BombardRange || dist == 0) return false;
+
+        var targets = Units.Where(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && IsHostile(unit, u)).ToList();
+        var enemyCity = Cities.Find(c => c.X == targetX && c.Y == targetY && c.Faction != unit.Faction && IsHostileToFaction(unit.Faction, c.Faction));
+
+        if (targets.Count == 0 && enemyCity == null) return false;
+
+        unit.RemainingMovement = 0;
+
+        if (targets.Count > 0)
+        {
+            targets.Sort((a, b) => b.DefenseStrength.CompareTo(a.DefenseStrength));
+            var defender = targets[0];
+
+            float hitChance = (float)unit.BombardStrength / (unit.BombardStrength + Math.Max(1.0f, defender.DefenseStrength));
+            hitChance = Math.Clamp(hitChance, 0.25f, 0.85f);
+
+            bool hit = Random.Shared.NextDouble() < hitChance;
+            if (hit)
+            {
+                int dmg = Math.Clamp((int)(22.0f * ((float)unit.BombardStrength / Math.Max(1.0f, defender.DefenseStrength))), 12, 35);
+                defender.Health -= dmg;
+                Console.WriteLine($"[Bombard] {unit.Type} hits {defender.Type} at ({targetX}, {targetY}) for {dmg} damage! (Remaining HP: {defender.Health})");
+
+                bool hasLethalBombard = unit.Domain == UnitDomain.Air || unit.Domain == UnitDomain.Sea || unit.Type == UnitType.CruiseMissile;
+                if (defender.Health <= 0)
+                {
+                    if (hasLethalBombard)
+                    {
+                        Console.WriteLine($"[Bombard] {defender.Type} destroyed by lethal bombardment!");
+                        DestroyUnit(defender);
+                    }
+                    else
+                    {
+                        defender.Health = 1;
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[Bombard] {unit.Type} bombarded ({targetX}, {targetY}) but missed.");
+            }
+        }
+        else if (enemyCity != null)
+        {
+            Console.WriteLine($"[Bombard] {unit.Type} bombarded enemy city {enemyCity.Name}!");
+            if (enemyCity.Population > 1 && Random.Shared.Next(2) == 0)
+            {
+                enemyCity.Population--;
+                Console.WriteLine($"[Bombard] Citizen casualty in {enemyCity.Name}! Population reduced to {enemyCity.Population}.");
+            }
+            else if (enemyCity.Buildings.Count > 0 && Random.Shared.Next(2) == 0)
+            {
+                var nonPalace = enemyCity.Buildings.Where(b => !(b is Palace)).ToList();
+                if (nonPalace.Count > 0)
+                {
+                    var ruined = nonPalace[Random.Shared.Next(nonPalace.Count)];
+                    enemyCity.Buildings.Remove(ruined);
+                    Console.WriteLine($"[Bombard] Building destroyed in {enemyCity.Name}: {ruined.Name}!");
+                }
+            }
+        }
+
+        UpdateVisibility();
+        return true;
+    }
+
+    public bool ExecuteAirRebase(Unit airUnit, int targetX, int targetY)
+    {
+        if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
+        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        if (dist > airUnit.OperationalRange * 2) return false;
+
+        bool validBase = Cities.Any(c => c.X == targetX && c.Y == targetY && c.Faction == airUnit.Faction);
+        if (!validBase)
+        {
+            var carrier = Units.Find(u => u.X == targetX && u.Y == targetY && u.Faction == airUnit.Faction && u.Type == UnitType.Carrier && u.LoadedUnitIds.Count < u.TransportCapacity);
+            if (carrier != null)
+            {
+                validBase = true;
+            }
+        }
+
+        if (!validBase) return false;
+
+        airUnit.MoveTo(targetX, targetY, airUnit.MaxMovement);
+        airUnit.RemainingMovement = 0;
+        UpdateVisibility();
+        Console.WriteLine($"[Air Rebase] {airUnit.Type} rebased to ({targetX}, {targetY})!");
+        return true;
+    }
+
+    public bool ExecuteAirRecon(Unit airUnit, int targetX, int targetY)
+    {
+        if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
+        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        if (dist > airUnit.OperationalRange) return false;
+
+        int reconRadius = 2;
+        for (int dx = -reconRadius; dx <= reconRadius; dx++)
+        {
+            for (int dy = -reconRadius; dy <= reconRadius; dy++)
+            {
+                int tx = targetX + dx;
+                int ty = targetY + dy;
+                if (Map.IsInBounds(tx, ty))
+                {
+                    if (airUnit.Faction == Faction.Player)
+                    {
+                        VisibilityGrid[tx, ty] = FogState.Visible;
+                    }
+                }
+            }
+        }
+        airUnit.RemainingMovement = 0;
+        Console.WriteLine($"[Air Recon] {airUnit.Type} conducted reconnaissance over ({targetX}, {targetY})!");
+        return true;
+    }
+
+    public bool ExecuteAirStrike(Unit airUnit, int targetX, int targetY)
+    {
+        if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
+        if (!Map.IsInBounds(targetX, targetY)) return false;
+
+        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        if (dist > airUnit.OperationalRange || dist == 0) return false;
+
+        // Check for interception: is there an enemy interceptor or anti-air unit nearby?
+        var interceptor = Units.FirstOrDefault(u => u.TransportUnitId == null && IsHostile(airUnit, u) &&
+            (u.Type == UnitType.Fighter || u.Type == UnitType.JetFighter || u.Type == UnitType.F15 || u.Type == UnitType.Flak || u.Type == UnitType.MobileSAM || u.Type == UnitType.AegisCruiser) &&
+            Math.Max(Math.Abs(u.X - targetX), Math.Abs(u.Y - targetY)) <= 2);
+
+        if (interceptor != null && !airUnit.IsStealth)
+        {
+            float interceptChance = (interceptor.Type == UnitType.JetFighter || interceptor.Type == UnitType.F15 || interceptor.Type == UnitType.MobileSAM) ? 0.65f : 0.45f;
+            if (Random.Shared.NextDouble() < interceptChance)
+            {
+                Console.WriteLine($"[Air Interception] {interceptor.Type} intercepted {airUnit.Type}!");
+                int dmg = Math.Clamp((int)(25.0f * (interceptor.DefenseStrength / Math.Max(1.0f, airUnit.DefenseStrength))), 15, 40);
+                airUnit.Health -= dmg;
+                airUnit.RemainingMovement = 0;
+                if (airUnit.Health <= 0)
+                {
+                    Console.WriteLine($"[Air Interception] {airUnit.Type} was shot down!");
+                    DestroyUnit(airUnit);
+                    return true;
+                }
+                Console.WriteLine($"[Air Interception] {airUnit.Type} aborted mission due to enemy interception!");
+                return true;
+            }
+        }
+
+        bool struck = ExecuteBombard(airUnit, targetX, targetY);
+
+        if (airUnit.Type == UnitType.CruiseMissile)
+        {
+            Console.WriteLine($"[Missile] {airUnit.Type} was expended in strike.");
+            DestroyUnit(airUnit);
+        }
+        else if (airUnit.Type == UnitType.TacticalNuke)
+        {
+            Console.WriteLine($"[Nuclear Strike] Tactical Nuke detonated at ({targetX}, {targetY})!");
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    int nx = targetX + dx;
+                    int ny = targetY + dy;
+                    var blastUnits = Units.Where(u => u.X == nx && u.Y == ny).ToList();
+                    foreach (var bu in blastUnits)
+                    {
+                        bu.Health -= 60;
+                        if (bu.Health <= 0) DestroyUnit(bu);
+                    }
+                }
+            }
+            DestroyUnit(airUnit);
+        }
+
+        return struck;
     }
 
     private void RelocateCapital(Faction faction)
@@ -1021,7 +1378,7 @@ public class GameSimulation
     private void CheckCityCapture(Unit unit, int x, int y)
     {
         // Only military units can capture cities
-        if (unit.Type != UnitType.Warrior && unit.Type != UnitType.Archer && unit.Type != UnitType.Barbarian) return;
+        if (unit.AttackStrength <= 0) return;
 
         var city = Cities.Find(c => c.X == x && c.Y == y);
         if (city == null) return;
@@ -1514,7 +1871,26 @@ public class GameSimulation
 
                 if (!Map.IsInBounds(nx, ny)) continue;
                 var tile = Map.GetTile(nx, ny);
-                if (tile == null || tile.IsOcean) continue;
+                if (tile == null) continue;
+
+                if (unit.Domain == UnitDomain.Sea)
+                {
+                    bool isWater = tile.IsOcean;
+                    bool isFriendlyPort = Cities.Any(c => c.X == nx && c.Y == ny && c.Faction == unit.Faction && c.IsCoastal(Map));
+                    if (!isWater && !isFriendlyPort) continue;
+                }
+                else if (unit.Domain == UnitDomain.Land)
+                {
+                    if (tile.IsOcean)
+                    {
+                        bool canBoard = Units.Any(u => u.X == nx && u.Y == ny && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+                        if (!canBoard) continue;
+                    }
+                }
+                else if (unit.Domain == UnitDomain.Air)
+                {
+                    continue;
+                }
 
                 float moveCost = GetTileMovementCostForUnit(tile, unit);
                 float remaining = Math.Max(0.0f, mp - moveCost);
@@ -1547,6 +1923,9 @@ public class GameSimulation
 
         // 3.5 Apply Battlefield Medicine healing effect
         HealWoundedUnits();
+
+        // 3.5.5 Process Naval Sinking risks for early vessels in Sea/Ocean
+        CheckNavalSinkingAtTurnEnd();
 
         // 3.6 Process Volcanic Eruptions (0.35% chance per turn per volcano)
         VolcanoSystem.ProcessEruptions(this);
@@ -2778,23 +3157,31 @@ public class GameSimulation
         if (project != ProductionProject.None && buildingId == null)
         {
             string unitId = $"unit_{Guid.NewGuid().ToString().Substring(0, 8)}";
-            UnitType type = project switch
+            if (!UnitDefinitionRegistry.TryMapProjectToUnitType(project, out var type))
             {
-                ProductionProject.Settler => UnitType.Settler,
-                ProductionProject.Worker => UnitType.Worker,
-                ProductionProject.Warrior => UnitType.Warrior,
-                ProductionProject.Archer => UnitType.Archer,
-                _ => UnitType.Explorer
-            };
+                type = UnitType.Warrior;
+            }
 
             var unit = new Unit(unitId, type, city.X, city.Y, city.Faction, city.CivilizationId);
 
             // Military Academy effect: if city has military_academy, military units start with +25% max health (125 HP instead of 100)
-            if (city.Buildings.Any(b => b.Id == "military_academy") && (type == UnitType.Warrior || type == UnitType.Archer))
+            if (city.Buildings.Any(b => b.Id == "military_academy") && unit.AttackStrength > 0)
             {
                 unit.MaxHealth = 125;
                 unit.Health = 125;
                 System.Console.WriteLine($"[Military Academy] Trained elite {type} with +25% max health (125 HP)!");
+            }
+            else
+            {
+                // Barracks / Sun Tzu's War Academy: military units start as Veteran (120 HP instead of 100)
+                bool hasBarracks = city.Buildings.Any(b => b.Id == "barracks") ||
+                                   Cities.Any(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "sun_tzu_war_academy"));
+                if (hasBarracks && unit.AttackStrength > 0 && unit.MaxHealth == 100)
+                {
+                    unit.MaxHealth = 120;
+                    unit.Health = 120;
+                    System.Console.WriteLine($"[Barracks] {unit.Type} enters service with Veteran status (120 HP)!");
+                }
             }
 
             Units.Add(unit);
@@ -2813,6 +3200,71 @@ public class GameSimulation
             city.CurrentProject = ProductionProject.None;
             city.CurrentProductionProgress = 0;
         }
+    }
+
+    public bool CanUpgradeUnit(Unit unit, out UnitType targetType, out int goldCost)
+    {
+        targetType = unit.Type;
+        goldCost = 0;
+
+        var def = UnitDefinitionRegistry.Get(unit.Type);
+        if (def.UpgradesTo == null) return false;
+
+        // Check if on friendly city tile with barracks or Sun Tzu's War Academy
+        var city = Cities.FirstOrDefault(c => c.X == unit.X && c.Y == unit.Y && c.Faction == unit.Faction);
+        if (city == null) return false;
+
+        bool hasBarracks = city.Buildings.Any(b => b.Id == "barracks") ||
+                           Cities.Any(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "sun_tzu_war_academy"));
+        if (!hasBarracks) return false;
+
+        // Check target unit type (consider civ UU for target)
+        var nextType = UnitDefinitionRegistry.GetCivUnitType(def.UpgradesTo.Value, unit.CivilizationId);
+        var targetDef = UnitDefinitionRegistry.Get(nextType);
+
+        // Tech prerequisite
+        if (targetDef.RequiredTechId != null && !IsTechResearched(unit.Faction, targetDef.RequiredTechId))
+            return false;
+
+        // Resource prerequisites
+        foreach (var reqRes in targetDef.RequiredResourceIds)
+        {
+            if (!CityHasResourceAccess(city, reqRes))
+                return false;
+        }
+
+        targetType = nextType;
+        goldCost = Math.Max(10, (targetDef.ShieldCost - def.ShieldCost) * 3);
+
+        if (unit.Faction == Faction.Player)
+        {
+            return PlayerTreasury >= goldCost;
+        }
+        return true;
+    }
+
+    public bool UpgradeUnit(Unit unit)
+    {
+        if (!CanUpgradeUnit(unit, out var targetType, out int goldCost))
+            return false;
+
+        if (unit.Faction == Faction.Player)
+        {
+            PlayerTreasury -= goldCost;
+        }
+
+        int oldHealth = unit.Health;
+        var newUnit = new Unit(unit.Id, targetType, unit.X, unit.Y, unit.Faction, unit.CivilizationId)
+        {
+            Health = oldHealth,
+            RemainingMovement = 0f,
+            IsFortified = unit.IsFortified
+        };
+
+        Units.Remove(unit);
+        Units.Add(newUnit);
+        Console.WriteLine($"[Upgrade] Upgraded {unit.Type} to {targetType} for {goldCost} gold!");
+        return true;
     }
 
     // Helper to check if city has access to a strategic resource

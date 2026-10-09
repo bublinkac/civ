@@ -6,11 +6,109 @@ namespace CivGame.Core;
 public enum ProductionProject
     {
         None,
+
+        // Civilian & Standard Units
         Explorer,
         Settler,
         Worker,
         Warrior,
+        Spearman,
         Archer,
+        Swordsman,
+        Chariot,
+        Horseman,
+        Catapult,
+
+        // Middle Ages
+        Pikeman,
+        MedievalInfantry,
+        Longbowman,
+        Knight,
+        Musketman,
+        Trebuchet,
+        Cannon,
+        Crusader,
+        AncientCavalry,
+
+        // Industrial Era
+        Rifleman,
+        Infantry,
+        Cavalry,
+        Guerrilla,
+        Artillery,
+        Flak,
+        Marine,
+        Paratrooper,
+        Tank,
+
+        // Modern Era
+        MechInfantry,
+        ModernArmor,
+        TOWInfantry,
+        ModernParatrooper,
+        MobileSAM,
+        RadarArtillery,
+
+        // Unique Units (UU)
+        Legionary,
+        Hoplite,
+        Immortals,
+        WarChariot,
+        MountedWarrior,
+        JaguarWarrior,
+        EnkiduWarrior,
+        Impi,
+        NumidianMercenary,
+        Bowman,
+        JavelinThrower,
+        ThreeManChariot,
+        ChasquiScout,
+        GallicSwordsman,
+        Samurai,
+        Rider,
+        AnsarWarrior,
+        WarElephant,
+        Keshik,
+        Berserk,
+        SwissMercenary,
+        Musketeer,
+        Hwacha,
+        Cossack,
+        Sipahi,
+        Panzer,
+        Dromon,
+        Carrack,
+        ManOWar,
+        F15,
+
+        // Naval Units
+        Curragh,
+        Galley,
+        Caravel,
+        Galleon,
+        Frigate,
+        Privateer,
+        Ironclad,
+        Transport,
+        Destroyer,
+        Cruiser,
+        Battleship,
+        Submarine,
+        Carrier,
+        NuclearSubmarine,
+        AegisCruiser,
+
+        // Air Units
+        Fighter,
+        Bomber,
+        JetFighter,
+        StealthFighter,
+        StealthBomber,
+        Helicopter,
+        CruiseMissile,
+        TacticalNuke,
+
+        // Buildings
         Granary,
         Monument,
         Walls,
@@ -398,27 +496,12 @@ public class City
 
     public int GetProjectCost(ProductionProject project, DifficultySettings? difficulty = null)
     {
-        int baseCost = project switch
-        {
-            ProductionProject.Explorer => 10,
-            ProductionProject.Settler => 20,
-            ProductionProject.Worker => 15,
-            ProductionProject.Warrior => 15,
-            ProductionProject.Archer => 20,
-            _ => GetBuildingCostFromRegistry(project)
-        };
+        bool isUnit = UnitDefinitionRegistry.TryMapProjectToUnitType(project, out var unitType);
+        int baseCost = isUnit ? UnitDefinitionRegistry.GetCost(unitType) : GetBuildingCostFromRegistry(project);
 
-        if (Faction == Faction.AiRival && difficulty != null)
+        if (Faction == Faction.AiRival && difficulty != null && isUnit)
         {
-            bool isUnit = project == ProductionProject.Explorer ||
-                          project == ProductionProject.Settler ||
-                          project == ProductionProject.Worker ||
-                          project == ProductionProject.Warrior ||
-                          project == ProductionProject.Archer;
-            if (isUnit)
-            {
-                baseCost = (int)Math.Max(1, Math.Round(baseCost * difficulty.AiProductionCostMultiplier));
-            }
+            baseCost = (int)Math.Max(1, Math.Round(baseCost * difficulty.AiProductionCostMultiplier));
         }
 
         // Apply Civ3 trait discounts (50% reduction for specific buildings/units)

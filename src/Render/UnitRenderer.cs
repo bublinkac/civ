@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using CivGame.Core;
 
@@ -10,6 +11,7 @@ public partial class UnitRenderer : Node2D
     private MapRenderer? _mapRenderer;
     private readonly Dictionary<string, Sprite2D> _sprites = new();
     private readonly Dictionary<string, Node2D> _stackIndicators = new();
+    private readonly Dictionary<UnitType, Texture2D> _unitTextureCache = new();
     private Sprite2D? _selectionRing;
     private string? _selectedUnitId;
 
@@ -79,6 +81,16 @@ public partial class UnitRenderer : Node2D
         var tileGroups = new Dictionary<(int, int), List<Unit>>();
         foreach (var unit in sim.Units)
         {
+            // Embarked units are carried inside transports and not rendered as separate ground units
+            if (unit.IsLoadedInTransport) continue;
+
+            // Opposing stealth units (e.g. Submarines) are invisible unless detected by sonar/detectors
+            if (unit.IsStealth && unit.Faction != Faction.Player)
+            {
+                bool detected = sim.Units.Any(u => u.Faction == Faction.Player && u.DetectsStealth && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 2);
+                if (!detected) continue;
+            }
+
             var key = (unit.X, unit.Y);
             if (!tileGroups.ContainsKey(key))
                 tileGroups[key] = new List<Unit>();
@@ -283,18 +295,13 @@ public partial class UnitRenderer : Node2D
 
     private Texture2D GetOrCreateUnitTexture(UnitType type)
     {
-        string dirPath = "res://assets";
-        string baseName = type switch
+        if (_unitTextureCache.TryGetValue(type, out var cached))
         {
-            UnitType.Explorer => "explorer",
-            UnitType.Settler => "settler",
-            UnitType.Warrior => "warrior",
-            UnitType.Archer => "archer",
-            UnitType.Barbarian => "warrior", // Barbarians share the warrior texture but will be tinted red
-            UnitType.Worker => "worker",
-            _ => type.ToString().ToLower()
-        };
+            return cached;
+        }
 
+        string dirPath = "res://assets";
+        string baseName = GetUnitAssetBaseName(type);
         string origPath = $"{dirPath}/{baseName}_orig.webp";
         
         // Use FileAccess.FileExists to check if the file is on disk (even if not imported by Godot yet)
@@ -307,7 +314,9 @@ public partial class UnitRenderer : Node2D
                 {
                     img = MakeBackgroundTransparentBFS(img, Colors.White);
                     GD.Print($"[UnitRenderer] Loaded ORIGINAL texture for {type} from {origPath}");
-                    return ImageTexture.CreateFromImage(img);
+                    var tex = ImageTexture.CreateFromImage(img);
+                    _unitTextureCache[type] = tex;
+                    return tex;
                 }
             }
             catch (Exception ex)
@@ -352,8 +361,103 @@ public partial class UnitRenderer : Node2D
         }
 
         GD.Print($"[UnitRenderer] Generated and loaded PROCEDURAL texture for {type} from {filePath}");
-        return ImageTexture.CreateFromImage(genImg);
+        var proceduralTex = ImageTexture.CreateFromImage(genImg);
+        _unitTextureCache[type] = proceduralTex;
+        return proceduralTex;
     }
+
+    public static string GetUnitAssetBaseName(UnitType type) => type switch
+    {
+        UnitType.Explorer => "explorer",
+        UnitType.Settler => "settler",
+        UnitType.Worker => "worker",
+        UnitType.Barbarian => "warrior",
+        UnitType.Warrior => "warrior",
+        UnitType.Spearman => "spearman",
+        UnitType.Archer => "archer",
+        UnitType.Swordsman => "swordsman",
+        UnitType.Chariot => "chariot",
+        UnitType.Horseman => "horseman",
+        UnitType.Catapult => "catapult",
+        UnitType.Pikeman => "pikeman",
+        UnitType.MedievalInfantry => "medieval_infantry",
+        UnitType.Longbowman => "longbowman",
+        UnitType.Knight => "knight",
+        UnitType.Musketman => "musketman",
+        UnitType.Trebuchet => "trebuchet",
+        UnitType.Cannon => "cannon",
+        UnitType.Crusader => "crusader",
+        UnitType.AncientCavalry => "ancient_cavalry",
+        UnitType.Rifleman => "rifleman",
+        UnitType.Infantry => "infantry",
+        UnitType.Cavalry => "cavalry",
+        UnitType.Guerrilla => "guerilla",
+        UnitType.Artillery => "artillery",
+        UnitType.Flak => "flak",
+        UnitType.Marine => "marine",
+        UnitType.Paratrooper => "paratrooper",
+        UnitType.Tank => "tank",
+        UnitType.MechInfantry => "mech_infantry",
+        UnitType.ModernArmor => "modern_armor",
+        UnitType.TOWInfantry => "tow_infantry",
+        UnitType.ModernParatrooper => "modern_paratrooper",
+        UnitType.MobileSAM => "mobile_sam",
+        UnitType.RadarArtillery => "radar_artillery",
+        UnitType.Legionary => "legionary",
+        UnitType.Hoplite => "hoplite",
+        UnitType.Immortals => "immortals",
+        UnitType.WarChariot => "war_chariot",
+        UnitType.MountedWarrior => "mounted_warrior",
+        UnitType.JaguarWarrior => "jaguar_warrior",
+        UnitType.EnkiduWarrior => "enkidu_warrior",
+        UnitType.Impi => "impi",
+        UnitType.NumidianMercenary => "numidian_mercenary",
+        UnitType.Bowman => "bowman",
+        UnitType.JavelinThrower => "javelin_thrower",
+        UnitType.ThreeManChariot => "three-man_chariot",
+        UnitType.ChasquiScout => "chasqui_scout",
+        UnitType.GallicSwordsman => "gallic_swordsman",
+        UnitType.Samurai => "samurai",
+        UnitType.Rider => "rider",
+        UnitType.AnsarWarrior => "ansar_warrior",
+        UnitType.WarElephant => "war_elephant",
+        UnitType.Keshik => "keshik",
+        UnitType.Berserk => "berserk",
+        UnitType.SwissMercenary => "swiss_mercenary",
+        UnitType.Musketeer => "musketeer",
+        UnitType.Hwacha => "hwacha",
+        UnitType.Cossack => "cossack",
+        UnitType.Sipahi => "sipahi",
+        UnitType.Panzer => "panzer",
+        UnitType.Dromon => "dromon",
+        UnitType.Carrack => "carrack",
+        UnitType.ManOWar => "man-o-war",
+        UnitType.F15 => "f-15",
+        UnitType.Curragh => "curragh",
+        UnitType.Galley => "galley",
+        UnitType.Caravel => "caravel",
+        UnitType.Galleon => "galleon",
+        UnitType.Frigate => "frigate",
+        UnitType.Privateer => "privateer",
+        UnitType.Ironclad => "ironclad",
+        UnitType.Transport => "transport",
+        UnitType.Destroyer => "destroyer",
+        UnitType.Cruiser => "cruiser",
+        UnitType.Battleship => "battleship",
+        UnitType.Submarine => "submarine",
+        UnitType.Carrier => "carrier",
+        UnitType.NuclearSubmarine => "nuclear_submarine",
+        UnitType.AegisCruiser => "aegis_cruiser",
+        UnitType.Fighter => "fighter",
+        UnitType.Bomber => "bomber",
+        UnitType.JetFighter => "jet_fighter",
+        UnitType.StealthFighter => "stealth_fighter",
+        UnitType.StealthBomber => "stealth_bomber",
+        UnitType.Helicopter => "helicopter",
+        UnitType.CruiseMissile => "cruise_missile",
+        UnitType.TacticalNuke => "tactical_nuke",
+        _ => type.ToString().ToLower()
+    };
 
     private static Image MakeBackgroundTransparentBFS(Image img, Color keyColor, float threshold = 0.08f)
     {

@@ -231,14 +231,14 @@ public static class AiRivalBrain
         // Priority 1: Defend the city if threatened or completely empty
         if (underThreat && garrisonCount < 2)
         {
-            city.CurrentProject = ProductionProject.Archer;
-            Console.WriteLine($"[AI Rival] City {city.Name} is threatened! Training Archer as defender.");
+            city.CurrentProject = GetBestDefensiveUnit(city, sim);
+            Console.WriteLine($"[AI Rival] City {city.Name} is threatened! Training {city.CurrentProject} as defender.");
             return;
         }
         if (garrisonCount == 0)
         {
-            city.CurrentProject = ProductionProject.Warrior;
-            Console.WriteLine($"[AI Rival] City {city.Name} is undefended! Training Warrior.");
+            city.CurrentProject = GetBestDefensiveUnit(city, sim);
+            Console.WriteLine($"[AI Rival] City {city.Name} is undefended! Training {city.CurrentProject}.");
             return;
         }
 
@@ -303,7 +303,7 @@ public static class AiRivalBrain
         var rand = new Random();
         if (rand.NextDouble() < leader.BuildUnitChance)
         {
-            city.CurrentProject = rand.Next(2) == 0 ? ProductionProject.Archer : ProductionProject.Warrior;
+            city.CurrentProject = rand.Next(2) == 0 ? GetBestDefensiveUnit(city, sim) : GetBestOffensiveUnit(city, sim);
         }
         else
         {
@@ -313,10 +313,90 @@ public static class AiRivalBrain
             }
             else
             {
-                city.CurrentProject = ProductionProject.Warrior;
+                city.CurrentProject = rand.Next(2) == 0 ? GetBestDefensiveUnit(city, sim) : GetBestOffensiveUnit(city, sim);
             }
         }
         Console.WriteLine($"[AI Rival] City {city.Name} defaulted to project: {city.CurrentProject}");
+    }
+
+    private static ProductionProject GetBestDefensiveUnit(City city, GameSimulation sim)
+    {
+        UnitType[] candidates = new[]
+        {
+            UnitType.MechInfantry,
+            UnitType.TOWInfantry,
+            UnitType.Infantry,
+            UnitType.Rifleman,
+            UnitType.Musketman,
+            UnitType.Pikeman,
+            UnitType.Spearman,
+            UnitType.Warrior
+        };
+
+        foreach (var baseType in candidates)
+        {
+            var effectiveType = UnitDefinitionRegistry.GetCivUnitType(baseType, city.CivilizationId);
+            var def = UnitDefinitionRegistry.Get(effectiveType);
+
+            if (def.RequiredTechId != null && !sim.IsTechResearched(city.Faction, def.RequiredTechId))
+                continue;
+
+            bool hasAllRes = true;
+            foreach (var reqRes in def.RequiredResourceIds)
+            {
+                if (!sim.CityHasResourceAccess(city, reqRes))
+                {
+                    hasAllRes = false;
+                    break;
+                }
+            }
+            if (!hasAllRes) continue;
+
+            return UnitDefinitionRegistry.MapUnitTypeToProject(effectiveType);
+        }
+
+        return ProductionProject.Warrior;
+    }
+
+    private static ProductionProject GetBestOffensiveUnit(City city, GameSimulation sim)
+    {
+        UnitType[] candidates = new[]
+        {
+            UnitType.ModernArmor,
+            UnitType.Tank,
+            UnitType.Cavalry,
+            UnitType.Knight,
+            UnitType.MedievalInfantry,
+            UnitType.Swordsman,
+            UnitType.Horseman,
+            UnitType.Chariot,
+            UnitType.Archer,
+            UnitType.Warrior
+        };
+
+        foreach (var baseType in candidates)
+        {
+            var effectiveType = UnitDefinitionRegistry.GetCivUnitType(baseType, city.CivilizationId);
+            var def = UnitDefinitionRegistry.Get(effectiveType);
+
+            if (def.RequiredTechId != null && !sim.IsTechResearched(city.Faction, def.RequiredTechId))
+                continue;
+
+            bool hasAllRes = true;
+            foreach (var reqRes in def.RequiredResourceIds)
+            {
+                if (!sim.CityHasResourceAccess(city, reqRes))
+                {
+                    hasAllRes = false;
+                    break;
+                }
+            }
+            if (!hasAllRes) continue;
+
+            return UnitDefinitionRegistry.MapUnitTypeToProject(effectiveType);
+        }
+
+        return ProductionProject.Warrior;
     }
 
     private static string? GetBuildingIdFromProject(ProductionProject project)

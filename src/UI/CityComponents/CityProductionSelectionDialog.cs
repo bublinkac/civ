@@ -211,17 +211,40 @@ public partial class CityProductionSelectionDialog : CanvasLayer
             itemHBox.AddChild(infoVBox);
 
             // Unit Stats (Civ3 Style)
-            string unitStats = proj switch
+            string unitStats = "";
+            string displayName = proj.ToString();
+            if (UnitDefinitionRegistry.TryMapProjectToUnitType(proj, out var uType))
             {
-                ProductionProject.Explorer => " 0.0.2",
-                ProductionProject.Settler => " 0.0.1",
-                ProductionProject.Worker => " 0.0.1",
-                ProductionProject.Warrior => " 1.1.1",
-                ProductionProject.Archer => " 2(1).1.1",
-                _ => ""
-            };
+                var uDef = UnitDefinitionRegistry.Get(uType);
+                displayName = uDef.Name;
+                if (uDef.Domain == UnitDomain.Air)
+                {
+                    unitStats = $" ({uDef.AttackStrength}.{uDef.DefenseStrength} R:{uDef.OperationalRange} B:{uDef.BombardStrength})";
+                }
+                else if (uDef.TransportCapacity > 0)
+                {
+                    unitStats = $" ({uDef.AttackStrength}.{uDef.DefenseStrength}.{uDef.Movement:F0} T:{uDef.TransportCapacity})";
+                }
+                else if (uDef.BombardStrength > 0)
+                {
+                    unitStats = $" ({uDef.AttackStrength}.{uDef.DefenseStrength}.{uDef.Movement:F0} B:{uDef.BombardStrength})";
+                }
+                else if (uDef.AttackStrength > 0 || uDef.DefenseStrength > 0)
+                {
+                    unitStats = $" ({uDef.AttackStrength}.{uDef.DefenseStrength}.{uDef.Movement:F0})";
+                }
+                else
+                {
+                    unitStats = $" ({uDef.Movement:F0} Mov)";
+                }
 
-            var nameLbl = new Label { Text = $"{proj}{unitStats}" };
+                if (uDef.RequiredResourceIds.Length > 0)
+                {
+                    unitStats += $" [{string.Join(", ", uDef.RequiredResourceIds)}]";
+                }
+            }
+
+            var nameLbl = new Label { Text = $"{displayName}{unitStats}" };
             nameLbl.AddThemeFontSizeOverride("font_size", 10);
             nameLbl.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.12f));
             nameLbl.MouseFilter = Control.MouseFilterEnum.Ignore;
@@ -259,11 +282,7 @@ public partial class CityProductionSelectionDialog : CanvasLayer
             };
 
             // Categorize into Units or Buildings/Wonders lists
-            bool isUnit = proj == ProductionProject.Explorer ||
-                          proj == ProductionProject.Settler ||
-                          proj == ProductionProject.Worker ||
-                          proj == ProductionProject.Warrior ||
-                          proj == ProductionProject.Archer;
+            bool isUnit = UnitDefinitionRegistry.TryMapProjectToUnitType(proj, out _);
 
             if (isUnit)
             {
@@ -313,15 +332,100 @@ public partial class CityProductionSelectionDialog : CanvasLayer
     {
         var list = new List<ProductionProject>();
 
-        // 1. Units are always available (or based on techs)
-        list.Add(ProductionProject.Explorer);
-        list.Add(ProductionProject.Settler);
-        list.Add(ProductionProject.Worker);
-        list.Add(ProductionProject.Warrior);
-
-        if (sim.Research.IsResearched("bronze_working"))
+        // 1. Units across 4 eras (Civilian, Ancient, Middle Ages, Industrial, Modern)
+        var standardUnits = new[]
         {
-            list.Add(ProductionProject.Archer);
+            UnitType.Settler,
+            UnitType.Worker,
+            UnitType.Explorer,
+            UnitType.Warrior,
+            UnitType.Spearman,
+            UnitType.Archer,
+            UnitType.Swordsman,
+            UnitType.Chariot,
+            UnitType.Horseman,
+            UnitType.Catapult,
+            UnitType.Pikeman,
+            UnitType.MedievalInfantry,
+            UnitType.Longbowman,
+            UnitType.Knight,
+            UnitType.Musketman,
+            UnitType.Trebuchet,
+            UnitType.Cannon,
+            UnitType.Crusader,
+            UnitType.AncientCavalry,
+            UnitType.Rifleman,
+            UnitType.Infantry,
+            UnitType.Cavalry,
+            UnitType.Guerrilla,
+            UnitType.Artillery,
+            UnitType.Flak,
+            UnitType.Marine,
+            UnitType.Paratrooper,
+            UnitType.Tank,
+            UnitType.MechInfantry,
+            UnitType.ModernArmor,
+            UnitType.TOWInfantry,
+            UnitType.ModernParatrooper,
+            UnitType.MobileSAM,
+            UnitType.RadarArtillery,
+
+            // Naval Units (Ancient -> Modern)
+            UnitType.Curragh,
+            UnitType.Galley,
+            UnitType.Caravel,
+            UnitType.Galleon,
+            UnitType.Frigate,
+            UnitType.Privateer,
+            UnitType.Ironclad,
+            UnitType.Transport,
+            UnitType.Destroyer,
+            UnitType.Cruiser,
+            UnitType.Battleship,
+            UnitType.Submarine,
+            UnitType.Carrier,
+            UnitType.NuclearSubmarine,
+            UnitType.AegisCruiser,
+
+            // Air Units (Industrial & Modern)
+            UnitType.Fighter,
+            UnitType.Bomber,
+            UnitType.JetFighter,
+            UnitType.StealthFighter,
+            UnitType.StealthBomber,
+            UnitType.Helicopter,
+            UnitType.CruiseMissile,
+            UnitType.TacticalNuke
+        };
+
+        foreach (var baseType in standardUnits)
+        {
+            // Replace with civilization's unique unit if available
+            var effectiveType = UnitDefinitionRegistry.GetCivUnitType(baseType, city.CivilizationId);
+            var def = UnitDefinitionRegistry.Get(effectiveType);
+
+            // Coastal check: Naval units can only be constructed in coastal cities
+            if (def.Domain == UnitDomain.Sea && !city.IsCoastal(sim.Map))
+                continue;
+
+            // Tech prerequisite check
+            if (def.RequiredTechId != null && !sim.Research.IsResearched(def.RequiredTechId))
+                continue;
+
+            // Strategic resource prerequisite check
+            bool hasResources = true;
+            foreach (var reqRes in def.RequiredResourceIds)
+            {
+                if (!sim.CityHasResourceAccess(city, reqRes))
+                {
+                    hasResources = false;
+                    break;
+                }
+            }
+            if (!hasResources)
+                continue;
+
+            list.Add(UnitDefinitionRegistry.MapUnitTypeToProject(effectiveType));
         }
 
         // 2. Add buildings/wonders from registry if unlocked and not yet built
