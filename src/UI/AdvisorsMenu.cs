@@ -16,6 +16,9 @@ public partial class AdvisorsMenu : PanelContainer
     public event Action? OnOpenForeignAdvisor;
     public event Action? OnOpenCulturalAdvisor;
     public event Action? OnOpenTradeAdvisor;
+    public event Action? OnOpenWonders;
+    public event Action? OnOpenHistograph;
+    public event Action? OnOpenDemographics;
     
     public AdvisorsMenu()
     {
@@ -32,15 +35,15 @@ public partial class AdvisorsMenu : PanelContainer
         };
         AddThemeStyleboxOverride("panel", style);
 
-        CustomMinimumSize = new Vector2(340, 560);
+        CustomMinimumSize = new Vector2(340, 700);
         AnchorLeft = 0.5f;
         AnchorTop = 0.5f;
         AnchorRight = 0.5f;
         AnchorBottom = 0.5f;
         OffsetLeft = -170;
-        OffsetTop = -280;
+        OffsetTop = -350;
         OffsetRight = 170;
-        OffsetBottom = 280;
+        OffsetBottom = 350;
         GrowHorizontal = GrowDirection.Both;
         GrowVertical = GrowDirection.Both;
 
@@ -103,6 +106,24 @@ public partial class AdvisorsMenu : PanelContainer
         scienceBtn.Pressed += () => { OnOpenScienceAdvisor?.Invoke(); QueueFree(); };
         vbox.AddChild(scienceBtn);
 
+        // F7 — Wonders of the World
+        var wondersBtn = CreateAdvisorButton("F7  WONDERS", "Wonders of the world",
+            new Color(0.45f, 0.35f, 0.20f));
+        wondersBtn.Pressed += () => { OnOpenWonders?.Invoke(); QueueFree(); };
+        vbox.AddChild(wondersBtn);
+
+        // F9 — Histograph
+        var histoBtn = CreateAdvisorButton("F9  HISTOGRAPH", "Civilization power over time",
+            new Color(0.20f, 0.30f, 0.45f));
+        histoBtn.Pressed += () => { OnOpenHistograph?.Invoke(); QueueFree(); };
+        vbox.AddChild(histoBtn);
+
+        // F11 — Demographics
+        var demoBtn = CreateAdvisorButton("F11  DEMOGRAPHICS", "Empire statistics comparison",
+            new Color(0.30f, 0.40f, 0.30f));
+        demoBtn.Pressed += () => { OnOpenDemographics?.Invoke(); QueueFree(); };
+        vbox.AddChild(demoBtn);
+
         vbox.AddChild(new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill });
 
         var closeBtn = new Button { Text = "BACK TO MAP", CustomMinimumSize = new Vector2(0, 40) };
@@ -114,7 +135,7 @@ public partial class AdvisorsMenu : PanelContainer
 
     private Button CreateAdvisorButton(string title, string description, Color color)
     {
-        var btn = new Button { CustomMinimumSize = new Vector2(0, 55) };
+        var btn = new Button { CustomMinimumSize = new Vector2(0, 46) };
         btn.ClipText = false;
         btn.Text = $"{title}\n  {description}";
         btn.Alignment = HorizontalAlignment.Left;

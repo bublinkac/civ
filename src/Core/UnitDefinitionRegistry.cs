@@ -474,6 +474,16 @@ public static class UnitDefinitionRegistry
             requiredTechId: "fission", requiredResourceIds: new[] { "uranium" }, domain: UnitDomain.Air,
             operationalRange: 4, bombardStrength: 30,
             description: "Tactical nuclear weapon causing cataclysmic area destruction and radiation fallout."));
+
+        // ═══════════════════════════════════════════════════════
+        // GREAT LEADERS & ARMIES
+        // ═══════════════════════════════════════════════════════
+        Register(new(UnitType.GreatLeader, "Great Leader", TechEra.Ancient, 0, 0, 3f, 0,
+            description: "A great military leader spawned from elite combat. Can hurry production or form an Army."));
+            
+        Register(new(UnitType.Army, "Army", TechEra.Ancient, 0, 0, 1f, 0,
+            transportCapacity: 3,
+            description: "A coalition of military units. Fights as a single massive force with combined health and multiple attacks."));
     }
 
     private static void Register(UnitDefinition def)

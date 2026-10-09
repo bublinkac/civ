@@ -30,8 +30,8 @@ public class Monument : Building
 
     public override void OnCompleted(City city, GameSimulation sim)
     {
-        sim.ClaimCityTerritory(city, 2);
-        System.Console.WriteLine($"[Cultural Expansion] {city.Name}'s borders expanded due to newly built Monument!");
+        sim.CalculateCulturalBorders();
+        System.Console.WriteLine($"[Cultural Expansion] {city.Name}'s borders recalculated due to newly built Monument!");
     }
 }
 

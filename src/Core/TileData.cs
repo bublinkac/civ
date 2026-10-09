@@ -58,6 +58,7 @@ public class TileData
         }
         set => _movementCost = value;
     }
+    public bool HasRiver { get; set; } = false;
     public bool HasRoad { get; set; } = false;
     public bool HasRailroad { get; set; } = false;
     public bool IsPolluted { get; set; } = false;
@@ -122,6 +123,12 @@ public class TileData
 
             // Civ3 Road bonus: +1 Commerce on worked tiles (except water)
             if (HasRoad && Terrain.Id != "ocean" && Terrain.Id != "sea" && Terrain.Id != "coast")
+            {
+                commerce += 1;
+            }
+
+            // Civ3 River bonus: +1 Commerce
+            if (HasRiver)
             {
                 commerce += 1;
             }

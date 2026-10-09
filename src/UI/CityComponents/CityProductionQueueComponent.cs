@@ -54,13 +54,7 @@ public partial class CityProductionQueueComponent : PanelContainer
 
         // City Center
         var centerTile = sim.Map.GetTile(city.X, city.Y);
-        if (centerTile != null)
-        {
-            // Civ3: city center guarantees minimum 1 food, 1 shield, 1 commerce
-            baseFood += Math.Max(1, centerTile.TotalYield.Food);
-            baseProd += Math.Max(1, centerTile.TotalYield.Production);
-            baseComm += Math.Max(1, centerTile.TotalYield.Commerce);
-        }
+        // Initialized later accurately with Gov + Golden Age bonuses
 
         // Surrounding worked tiles (match simulation logic: manual + auto-fill to population)
         var workingTiles = new List<TileData>();
@@ -112,11 +106,73 @@ public partial class CityProductionQueueComponent : PanelContainer
             }
         }
 
+        var ga = city.Faction == Faction.Player ? sim.PlayerGoldenAge : sim.AiGoldenAge;
+        var cityGov = Government.Get(city.Faction == Faction.Player ? sim.PlayerGovernment : sim.AiGovernment);
+
+        // Include center tile in GA/Gov logic by processing it alongside working tiles
+        // Note: For simplicity here we assume baseFood, baseProd, baseComm are calculated per tile in the loop
+        
+        // Reset base yields to 0 and recalculate everything accurately
+        baseFood = 0; baseProd = 0; baseComm = 0;
+        
+        // Re-process center tile with rules
+        if (centerTile != null)
+        {
+            int centerFood = centerTile.TotalYield.Food;
+            int centerProduction = centerTile.TotalYield.Production;
+            int centerCommerce = centerTile.TotalYield.Commerce;
+
+            if (city.Buildings.Any(b => b.Id == "colossus")) centerCommerce += 1;
+            if (city.HasTrait(CivTrait.Commercial)) centerCommerce += 1;
+            if (city.HasTrait(CivTrait.Agricultural)) centerFood += 1;
+            if (city.HasTrait(CivTrait.Industrious)) centerProduction += 1;
+            if (city.HasTrait(CivTrait.Seafaring) && city.IsCoastal(sim.Map)) centerCommerce += 1;
+
+            if (centerFood < 1) centerFood = 1;
+            if (centerProduction < 1) centerProduction = 1;
+            if (centerCommerce < 1) centerCommerce = 1;
+
+            if (cityGov.HasTilePenalty)
+            {
+                if (centerFood >= 3) centerFood--;
+                if (centerProduction >= 3) centerProduction--;
+                if (centerCommerce >= 3) centerCommerce--;
+            }
+            if (cityGov.HasCommerceBonus && centerCommerce >= 1) centerCommerce++;
+            if (ga.IsActive)
+            {
+                if (centerProduction >= 1) centerProduction++;
+                if (centerCommerce >= 1) centerCommerce++;
+            }
+
+            baseFood += centerFood;
+            baseProd += centerProduction;
+            baseComm += centerCommerce;
+        }
+
         foreach (var tile in workingTiles)
         {
-            baseFood += tile.TotalYield.Food;
-            baseProd += tile.TotalYield.Production;
-            baseComm += tile.TotalYield.Commerce;
+            int tileFood = tile.TotalYield.Food;
+            int tileProd = tile.TotalYield.Production;
+            int tileComm = tile.TotalYield.Commerce;
+
+            if (cityGov.HasTilePenalty)
+            {
+                if (tileFood >= 3) tileFood--;
+                if (tileProd >= 3) tileProd--;
+                if (tileComm >= 3) tileComm--;
+            }
+            if (cityGov.HasCommerceBonus && tileComm >= 1) tileComm++;
+            
+            if (ga.IsActive)
+            {
+                if (tileProd >= 1) tileProd++;
+                if (tileComm >= 1) tileComm++;
+            }
+
+            baseFood += tileFood;
+            baseProd += tileProd;
+            baseComm += tileComm;
         }
 
         // Apply Wonder/Small Wonder multipliers
@@ -178,15 +234,24 @@ public partial class CityProductionQueueComponent : PanelContainer
         int goldPart = (baseComm * sim.PlayerTaxRate) / 100;
         int sciPart = baseComm - goldPart;
 
+        // Add Specialist yields
+        int specGold = city.Specialists.Count(s => s == SpecialistType.Taxman) * 2;
+        int specSci = city.Specialists.Count(s => s == SpecialistType.Scientist) * 3;
+        
+        goldPart += specGold;
+        sciPart += specSci;
+
         var commSplit = new HBoxContainer();
         commBox.AddChild(commSplit);
 
-        var goldPartLabel = new Label { Text = $"💰 {goldPart} Gold ({sim.PlayerTaxRate}%)  " };
+        string specGoldStr = specGold > 0 ? $" (+{specGold} Spec)" : "";
+        var goldPartLabel = new Label { Text = $"💰 {goldPart} Gold ({sim.PlayerTaxRate}%){specGoldStr}  " };
         goldPartLabel.AddThemeFontSizeOverride("font_size", 10);
         goldPartLabel.AddThemeColorOverride("font_color", new Color(0.55f, 0.45f, 0.05f));
         commSplit.AddChild(goldPartLabel);
 
-        var sciPartLabel = new Label { Text = $"🧪 {sciPart} Science ({100 - sim.PlayerTaxRate}%)" };
+        string specSciStr = specSci > 0 ? $" (+{specSci} Spec)" : "";
+        var sciPartLabel = new Label { Text = $"🧪 {sciPart} Science ({100 - sim.PlayerTaxRate}%){specSciStr}" };
         sciPartLabel.AddThemeFontSizeOverride("font_size", 10);
         sciPartLabel.AddThemeColorOverride("font_color", new Color(0.1f, 0.45f, 0.55f));
         commSplit.AddChild(sciPartLabel);
@@ -212,6 +277,23 @@ public partial class CityProductionQueueComponent : PanelContainer
                 corrLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.15f, 0.15f));
                 cwBox.AddChild(corrLabel);
             }
+        }
+
+        // --- 3c. WLTKD (We Love The King Day) ---
+        if (city.IsWLTKD)
+        {
+            var wltkdBox = new HBoxContainer();
+            wltkdBox.AddThemeConstantOverride("separation", 5);
+            leftCol.AddChild(wltkdBox);
+
+            var wltkdIcon = new Label { Text = "🎉" };
+            wltkdIcon.AddThemeFontSizeOverride("font_size", 14);
+            wltkdBox.AddChild(wltkdIcon);
+
+            var wltkdLabel = new Label { Text = "We Love The King Day! (Rank waste eliminated)" };
+            wltkdLabel.AddThemeFontSizeOverride("font_size", 10);
+            wltkdLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.15f, 0.55f));
+            wltkdBox.AddChild(wltkdLabel);
         }
 
         // --- 4. GRANARY PREVIEW ---

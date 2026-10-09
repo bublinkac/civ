@@ -128,3 +128,81 @@ public class CleanPollution : TileImprovement
         return true;
     }
 }
+
+public class ClearForest : TileImprovement
+{
+    public override string Id => "clear_forest";
+    public override string Name => "Clear Forest";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 4;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id == "forest";
+    }
+}
+
+public class ClearJungle : TileImprovement
+{
+    public override string Id => "clear_jungle";
+    public override string Name => "Clear Jungle";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 6;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id == "jungle";
+    }
+}
+
+public class ClearMarsh : TileImprovement
+{
+    public override string Id => "clear_marsh";
+    public override string Name => "Clear Marsh";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 5;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id == "marsh";
+    }
+}
+
+public class PlantForest : TileImprovement
+{
+    public override string Id => "plant_forest";
+    public override string Name => "Plant Forest";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 5;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id == "grassland" || terrain.Id == "plains" || terrain.Id == "tundra";
+    }
+}
+
+public class AirfieldImprovement : TileImprovement
+{
+    public override string Id => "airfield";
+    public override string Name => "Airfield";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 3;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id != "ocean" && terrain.Id != "sea" && terrain.Id != "coast" && terrain.Id != "mountain" && terrain.Id != "volcano";
+    }
+}
+
+public class RadarTowerImprovement : TileImprovement
+{
+    public override string Id => "radar_tower";
+    public override string Name => "Radar Tower";
+    public override TileYield BonusYield => new TileYield(0, 0, 0);
+    public override int ConstructionTurns => 3;
+
+    public override bool CanBeBuiltOn(Terrain terrain)
+    {
+        return terrain.Id != "ocean" && terrain.Id != "sea" && terrain.Id != "coast" && terrain.Id != "mountain" && terrain.Id != "volcano";
+    }
+}

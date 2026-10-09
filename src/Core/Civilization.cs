@@ -58,6 +58,9 @@ public class GoldenAge
     public bool HasBeenUsed { get; set; } = false;
     public const int Duration = 20;
 
+    public event System.Action<string, string>? OnGoldenAgeStarted;
+    public event System.Action<string>? OnGoldenAgeEnded;
+
     /// <summary>
     /// Attempt to trigger a Golden Age. Returns true if successfully triggered.
     /// Will fail if already used or currently active.
@@ -69,6 +72,7 @@ public class GoldenAge
         HasBeenUsed = true;
         TurnsRemaining = Duration;
         System.Console.WriteLine($"[GOLDEN AGE] {factionName} enters a Golden Age! ({reason}) +1 shield and +1 commerce on all productive tiles for {Duration} turns!");
+        OnGoldenAgeStarted?.Invoke(factionName, reason);
         return true;
     }
 
@@ -80,6 +84,7 @@ public class GoldenAge
         {
             IsActive = false;
             System.Console.WriteLine("[GOLDEN AGE] The Golden Age has ended. Your civilization returns to normal productivity.");
+            OnGoldenAgeEnded?.Invoke("Faction");
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Godot;
 using CivGame.Core;
+using CivGame.Audio;
 
 namespace CivGame.UI;
 
@@ -11,7 +12,7 @@ namespace CivGame.UI;
 /// </summary>
 public partial class AdvisorScreen : PanelContainer
 {
-    public enum AdvisorTab { Domestic, Trade, Military, Foreign, Cultural, Science }
+    public enum AdvisorTab { Domestic, Trade, Military, Foreign, Cultural, Science, Wonders, Histograph, Demographics }
 
     private GameSimulation _sim;
     private AdvisorTab _currentTab;
@@ -32,6 +33,9 @@ public partial class AdvisorScreen : PanelContainer
         (AdvisorTab.Foreign,  "🌍 Foreign",  "F4", new Color(0.40f, 0.40f, 0.15f)),
         (AdvisorTab.Cultural, "🎭 Cultural", "F5", new Color(0.40f, 0.15f, 0.50f)),
         (AdvisorTab.Science,  "🔬 Science",  "F6", new Color(0.15f, 0.35f, 0.55f)),
+        (AdvisorTab.Wonders,  "🏛️ Wonders",  "F7", new Color(0.45f, 0.35f, 0.20f)),
+        (AdvisorTab.Histograph, "📈 Histograph", "F9", new Color(0.20f, 0.30f, 0.45f)),
+        (AdvisorTab.Demographics, "📊 Demographics", "F11", new Color(0.30f, 0.40f, 0.30f)),
     };
 
     public AdvisorScreen(GameSimulation sim, AdvisorTab initialTab = AdvisorTab.Domestic)
@@ -77,7 +81,7 @@ public partial class AdvisorScreen : PanelContainer
         sidebarMargin.AddThemeConstantOverride("margin_bottom", 12);
 
         _sidebarVBox = new VBoxContainer();
-        _sidebarVBox.AddThemeConstantOverride("separation", 6);
+        _sidebarVBox.AddThemeConstantOverride("separation", 4);
 
         // Sidebar title
         var sidebarTitle = new Label { Text = "ADVISORS" };
@@ -91,15 +95,22 @@ public partial class AdvisorScreen : PanelContainer
         // Tab buttons
         foreach (var def in TabDefs)
         {
+            if (def.Tab == AdvisorTab.Wonders)
+                _sidebarVBox.AddChild(new HSeparator());
+
             var btn = new Button();
             btn.Text = $"{def.Label}\n  {def.Key}";
-            btn.CustomMinimumSize = new Vector2(140, 56);
+            btn.CustomMinimumSize = new Vector2(140, 46);
             btn.Alignment = HorizontalAlignment.Left;
             btn.AddThemeFontSizeOverride("font_size", 13);
             btn.AddThemeColorOverride("font_color", Colors.White);
 
             var tab = def.Tab;
-            btn.Pressed += () => SwitchTab(tab);
+            btn.Pressed += () => 
+            {
+                AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/advisor_tab.wav");
+                SwitchTab(tab);
+            };
             _tabButtons[def.Tab] = btn;
             _sidebarVBox.AddChild(btn);
         }
@@ -119,7 +130,12 @@ public partial class AdvisorScreen : PanelContainer
             CornerRadiusBottomLeft = 5, CornerRadiusBottomRight = 5
         };
         closeBtn.AddThemeStyleboxOverride("normal", closeBtnStyle);
-        closeBtn.Pressed += () => { OnClosed?.Invoke(); QueueFree(); };
+        closeBtn.Pressed += () => 
+        { 
+            AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/close.wav");
+            OnClosed?.Invoke(); 
+            QueueFree(); 
+        };
         _sidebarVBox.AddChild(closeBtn);
 
         sidebarMargin.AddChild(_sidebarVBox);
@@ -179,6 +195,9 @@ public partial class AdvisorScreen : PanelContainer
             AdvisorTab.Foreign  => "F O R E I G N   A D V I S O R",
             AdvisorTab.Cultural => "C U L T U R A L   A D V I S O R",
             AdvisorTab.Science  => "S C I E N C E   A D V I S O R",
+            AdvisorTab.Wonders  => "W O N D E R S   O F   T H E   W O R L D",
+            AdvisorTab.Histograph => "H I S T O G R A P H",
+            AdvisorTab.Demographics => "D E M O G R A P H I C S",
             _ => "A D V I S O R"
         };
 
@@ -218,6 +237,9 @@ public partial class AdvisorScreen : PanelContainer
             AdvisorTab.Foreign  => new ForeignAdvisorPanel(_sim, embedded: true),
             AdvisorTab.Cultural => new CulturalAdvisorPanel(_sim, embedded: true),
             AdvisorTab.Science  => new TechTreePanel(_sim, embedded: true),
+            AdvisorTab.Wonders  => new WondersPanel(_sim, embedded: true),
+            AdvisorTab.Histograph => new HistographPanel(_sim, embedded: true),
+            AdvisorTab.Demographics => new DemographicsPanel(_sim, embedded: true),
             _ => new Label { Text = "Unknown advisor" }
         };
     }
@@ -248,6 +270,9 @@ public partial class AdvisorScreen : PanelContainer
                 case Key.F4: SwitchTab(AdvisorTab.Foreign); break;
                 case Key.F5: SwitchTab(AdvisorTab.Cultural); break;
                 case Key.F6: SwitchTab(AdvisorTab.Science); break;
+                case Key.F7: SwitchTab(AdvisorTab.Wonders); break;
+                case Key.F9: SwitchTab(AdvisorTab.Histograph); break;
+                case Key.F11: SwitchTab(AdvisorTab.Demographics); break;
                 case Key.Escape: OnClosed?.Invoke(); QueueFree(); break;
             }
             GetViewport().SetInputAsHandled();

@@ -11,6 +11,7 @@ public partial class UnitRenderer : Node2D
     private MapRenderer? _mapRenderer;
     private readonly Dictionary<string, Sprite2D> _sprites = new();
     private readonly Dictionary<string, Node2D> _stackIndicators = new();
+    private readonly Dictionary<string, Label> _statusIcons = new();
     private readonly Dictionary<UnitType, Texture2D> _unitTextureCache = new();
     private Sprite2D? _selectionRing;
     private string? _selectedUnitId;
@@ -169,6 +170,37 @@ public partial class UnitRenderer : Node2D
                 else
                     sprite.SelfModulate = Colors.White;
 
+                // Status Icon
+                if (!_statusIcons.TryGetValue(unit.Id, out var statusLabel))
+                {
+                    statusLabel = new Label
+                    {
+                        ZIndex = 2,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+                    statusLabel.AddThemeFontSizeOverride("font_size", 14);
+                    statusLabel.AddThemeColorOverride("font_outline_color", Colors.Black);
+                    statusLabel.AddThemeConstantOverride("outline_size", 4);
+                    AddChild(statusLabel);
+                    _statusIcons[unit.Id] = statusLabel;
+                }
+
+                if (isTop)
+                {
+                    statusLabel.Position = sprite.Position + new Vector2(4, -20);
+                    if (unit.IsSleeping) statusLabel.Text = "💤";
+                    else if (unit.IsFortified) statusLabel.Text = "🛡️";
+                    else if (unit.IsSentry) statusLabel.Text = "👁️";
+                    else if (unit.IsAutomated) statusLabel.Text = "⚙️";
+                    else statusLabel.Text = "";
+                    statusLabel.Visible = !string.IsNullOrEmpty(statusLabel.Text);
+                }
+                else
+                {
+                    statusLabel.Visible = false;
+                }
+
                 // Selection ring follows the top unit
                 if (unit.Id == selectedUnitId)
                 {
@@ -219,6 +251,11 @@ public partial class UnitRenderer : Node2D
         foreach (var id in toRemove)
         {
             _sprites.Remove(id);
+            if (_statusIcons.TryGetValue(id, out var label))
+            {
+                label.QueueFree();
+                _statusIcons.Remove(id);
+            }
         }
     }
 
@@ -804,7 +841,7 @@ public partial class UnitRenderer : Node2D
                 }
             }
         }
-        else // Settler
+        else if (type == UnitType.Settler) // Settler
         {
             // Canvas cart/wagon
             Color woodColor = new Color(0.55f, 0.35f, 0.15f);
@@ -847,6 +884,36 @@ public partial class UnitRenderer : Node2D
                     }
                 }
             }
+        }
+        else if (type == UnitType.GreatLeader)
+        {
+            Color gold = new Color(0.9f, 0.8f, 0.2f);
+            Color darkGold = new Color(0.7f, 0.6f, 0.1f);
+            // Draw a star/crown shape
+            for (int y = 20; y <= 40; y++)
+            {
+                int w = y > 30 ? 15 : (y - 15);
+                for (int x = 32 - w; x <= 32 + w; x++)
+                {
+                    img.SetPixel(x, y, (x % 3 == 0) ? darkGold : gold);
+                }
+            }
+        }
+        else if (type == UnitType.Army)
+        {
+            Color red = new Color(0.8f, 0.2f, 0.2f);
+            Color darkRed = new Color(0.5f, 0.1f, 0.1f);
+            Color gold = new Color(0.9f, 0.8f, 0.2f);
+            // Big shield with a star
+            for (int y = 15; y <= 50; y++)
+            {
+                int w = y > 40 ? 15 - (y - 40) : 15;
+                for (int x = 32 - w; x <= 32 + w; x++)
+                {
+                    img.SetPixel(x, y, (x == 32 - w || x == 32 + w || y == 15 || y == 50) ? gold : red);
+                }
+            }
+            DrawCircle(img, 32, 32, 6, gold, darkRed);
         }
 
         return img;

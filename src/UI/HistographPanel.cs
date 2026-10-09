@@ -16,39 +16,53 @@ public partial class HistographPanel : PanelContainer
     private string _currentCategory = "Score";
     private HBoxContainer _categoryButtons;
     private Control _graphArea;
-    private Label _titleLabel;
+    private Label? _titleLabel;
+    private bool _embedded;
 
     private static readonly Color PlayerColor = new(0.2f, 0.6f, 1.0f);
     private static readonly Color AiColor = new(0.9f, 0.3f, 0.2f);
     private static readonly Color GridColor = new(0.4f, 0.4f, 0.4f, 0.3f);
     private static readonly Color BgDark = new(0.08f, 0.08f, 0.12f, 0.95f);
 
-    public HistographPanel(GameSimulation sim)
+    public HistographPanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
+        _embedded = embedded;
 
-        SetAnchorsPreset(Control.LayoutPreset.FullRect);
-
-        var bgStyle = new StyleBoxFlat
+        if (!embedded)
         {
-            BgColor = new Color(0.06f, 0.06f, 0.1f, 0.97f),
-            BorderWidthLeft = 3, BorderWidthTop = 3, BorderWidthRight = 3, BorderWidthBottom = 3,
-            BorderColor = new Color(0.7f, 0.6f, 0.3f, 0.9f)
-        };
-        AddThemeStyleboxOverride("panel", bgStyle);
+            SetAnchorsPreset(Control.LayoutPreset.FullRect);
+
+            var bgStyle = new StyleBoxFlat
+            {
+                BgColor = new Color(0.06f, 0.06f, 0.1f, 0.97f),
+                BorderWidthLeft = 3, BorderWidthTop = 3, BorderWidthRight = 3, BorderWidthBottom = 3,
+                BorderColor = new Color(0.7f, 0.6f, 0.3f, 0.9f)
+            };
+            AddThemeStyleboxOverride("panel", bgStyle);
+        }
+        else
+        {
+            SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            SizeFlagsVertical = SizeFlags.ExpandFill;
+            AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) });
+        }
 
         var mainVBox = new VBoxContainer();
 
-        // --- HEADER ---
-        _titleLabel = new Label { Text = "H I S T O G R A P H  —  Score" };
-        _titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.4f));
-        _titleLabel.AddThemeFontSizeOverride("font_size", 28);
-        _titleLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        var headerMargin = new MarginContainer();
-        headerMargin.AddThemeConstantOverride("margin_top", 10);
-        headerMargin.AddThemeConstantOverride("margin_bottom", 5);
-        headerMargin.AddChild(_titleLabel);
-        mainVBox.AddChild(headerMargin);
+        if (!embedded)
+        {
+            // --- HEADER ---
+            _titleLabel = new Label { Text = "H I S T O G R A P H  —  Score" };
+            _titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.85f, 0.4f));
+            _titleLabel.AddThemeFontSizeOverride("font_size", 28);
+            _titleLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            var headerMargin = new MarginContainer();
+            headerMargin.AddThemeConstantOverride("margin_top", 10);
+            headerMargin.AddThemeConstantOverride("margin_bottom", 5);
+            headerMargin.AddChild(_titleLabel);
+            mainVBox.AddChild(headerMargin);
+        }
 
         // --- CATEGORY BUTTONS ---
         _categoryButtons = new HBoxContainer();
@@ -82,8 +96,10 @@ public partial class HistographPanel : PanelContainer
         legendHBox.Alignment = BoxContainer.AlignmentMode.Center;
         legendHBox.AddThemeConstantOverride("separation", 30);
 
-        legendHBox.AddChild(CreateLegendItem(PlayerColor, $"Player ({_sim.PlayerCiv.Name})"));
-        legendHBox.AddChild(CreateLegendItem(AiColor, $"AI ({_sim.AiCiv.Name})"));
+        var playerLegendColor = _embedded ? PlayerColor.Darkened(0.25f) : PlayerColor;
+        var aiLegendColor = _embedded ? AiColor.Darkened(0.15f) : AiColor;
+        legendHBox.AddChild(CreateLegendItem(playerLegendColor, $"Player ({_sim.PlayerCiv.Name})"));
+        legendHBox.AddChild(CreateLegendItem(aiLegendColor, $"AI ({_sim.AiCiv.Name})"));
 
         var legendMargin = new MarginContainer();
         legendMargin.AddThemeConstantOverride("margin_bottom", 5);
@@ -105,7 +121,7 @@ public partial class HistographPanel : PanelContainer
         graphMargin.AddChild(_graphArea);
         mainVBox.AddChild(graphMargin);
 
-        // --- CLOSE BUTTON ---
+        // --- CLOSE BUTTON (standalone only) ---
         var closeMargin = new MarginContainer();
         closeMargin.AddThemeConstantOverride("margin_bottom", 10);
 
@@ -125,7 +141,7 @@ public partial class HistographPanel : PanelContainer
         closeBtn.AddThemeStyleboxOverride("normal", closeBtnStyle);
         closeBtn.Pressed += () => QueueFree();
         closeMargin.AddChild(closeBtn);
-        mainVBox.AddChild(closeMargin);
+        if (!_embedded) mainVBox.AddChild(closeMargin);
 
         AddChild(mainVBox);
     }
@@ -247,7 +263,8 @@ public partial class HistographPanel : PanelContainer
     private void SwitchCategory(string category)
     {
         _currentCategory = category;
-        _titleLabel.Text = $"H I S T O G R A P H  —  {category}";
+        if (_titleLabel != null)
+            _titleLabel.Text = $"H I S T O G R A P H  —  {category}";
 
         // Update button styles
         int idx = 0;

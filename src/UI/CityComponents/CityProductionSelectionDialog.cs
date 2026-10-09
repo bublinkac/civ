@@ -1,5 +1,6 @@
 using Godot;
 using CivGame.Core;
+using CivGame.Audio;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -78,7 +79,11 @@ public partial class CityProductionSelectionDialog : CanvasLayer
         closeBtn.Flat = true;
         closeBtn.AddThemeFontSizeOverride("font_size", 16);
         closeBtn.AddThemeColorOverride("font_color", new Color(0.5f, 0.4f, 0.3f));
-        closeBtn.Pressed += () => QueueFree();
+        closeBtn.Pressed += () => 
+        {
+            AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/close.wav");
+            QueueFree();
+        };
         titleHBox.AddChild(closeBtn);
 
         dialogVBox.AddChild(new HSeparator());
@@ -263,6 +268,7 @@ public partial class CityProductionSelectionDialog : CanvasLayer
             // Click Handler
             itemBtn.Pressed += () =>
             {
+                AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/build.wav");
                 bool isShiftHeld = Input.IsKeyPressed(Key.Shift);
                 if (isShiftHeld)
                 {

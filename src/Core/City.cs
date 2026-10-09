@@ -3,6 +3,13 @@ using System.Linq;
 
 namespace CivGame.Core;
 
+public enum SpecialistType
+{
+    Taxman,
+    Scientist,
+    Entertainer
+}
+
 public enum ProductionProject
     {
         None,
@@ -227,6 +234,9 @@ public class City
     public int HappyCitizens { get; set; } = 0;
     public int ContentCitizens { get; set; } = 1;
     public int UnhappyCitizens { get; set; } = 0;
+    
+    /// <summary>True if the city is celebrating 'We Love The King Day' (WLTKD).</summary>
+    public bool IsWLTKD { get; set; } = false;
 
 
     // Resource storage (accumulated yields)
@@ -249,6 +259,28 @@ public class City
 
     // Map tiles this city is actively working
     public System.Collections.Generic.HashSet<(int X, int Y)> WorkedTiles { get; } = new();
+
+    // Citizens that are not working tiles
+    public System.Collections.Generic.List<SpecialistType> Specialists { get; } = new();
+
+    public void ForceSyncTilesAndSpecialists()
+    {
+        while (WorkedTiles.Count > Population)
+        {
+            var toRemove = WorkedTiles.First();
+            WorkedTiles.Remove(toRemove);
+        }
+        
+        int expected = Math.Max(0, Population - WorkedTiles.Count);
+        while (Specialists.Count < expected)
+        {
+            Specialists.Add(SpecialistType.Entertainer); // Default
+        }
+        while (Specialists.Count > expected)
+        {
+            Specialists.RemoveAt(Specialists.Count - 1);
+        }
+    }
 
     public int GetDefenseBonus()
     {
@@ -306,8 +338,9 @@ public class City
     /// </summary>
     public void UpdateCitizenMood(GameSimulation sim, DifficultySettings? difficulty = null)
     {
-        int pop = Population;
-        if (pop <= 0) return;
+        ForceSyncTilesAndSpecialists();
+        
+        int workingPop = WorkedTiles.Count;
 
         // ═══════════════════════════════════════
         // STEP 0: Base distribution
@@ -316,10 +349,10 @@ public class City
         int baseUnhappy = difficulty?.BaseUnhappyCitizens ?? 0;
 
         int happy = 0;
-        int content = Math.Min(pop, baseContent);
-        int unhappy = Math.Max(0, pop - baseContent) + baseUnhappy;
-        if (content + unhappy > pop)
-            unhappy = Math.Max(0, pop - content);
+        int content = Math.Min(workingPop, baseContent);
+        int unhappy = Math.Max(0, workingPop - baseContent) + baseUnhappy;
+        if (content + unhappy > workingPop)
+            unhappy = Math.Max(0, workingPop - content);
 
         // ═══════════════════════════════════════
         // STEP 1: War Weariness (adds unhappy citizens)
@@ -436,14 +469,36 @@ public class City
         }
 
         // ═══════════════════════════════════════
+        // STEP 4.5: Entertainers (Specialists)
+        // ═══════════════════════════════════════
+        int entertainers = Specialists.Count(s => s == SpecialistType.Entertainer);
+        if (entertainers > 0)
+        {
+            int toConvert = Math.Min(unhappy, entertainers);
+            unhappy -= toConvert;
+            content += toConvert;
+            int remainingEntertainers = entertainers - toConvert;
+            
+            if (remainingEntertainers > 0 && content > 0)
+            {
+                int toConvertHappy = Math.Min(content, remainingEntertainers);
+                content -= toConvertHappy;
+                happy += toConvertHappy;
+            }
+        }
+
+        // ═══════════════════════════════════════
         // FINAL: Assign results
         // ═══════════════════════════════════════
         HappyCitizens = Math.Max(0, happy);
         ContentCitizens = Math.Max(0, content);
         UnhappyCitizens = Math.Max(0, unhappy);
 
-        // Civil Disorder: unhappy > happy and population > 1
-        IsInDisorder = UnhappyCitizens > HappyCitizens && pop > 1;
+        // Civil Disorder: unhappy > happy and workingPop > 1
+        IsInDisorder = UnhappyCitizens > HappyCitizens && workingPop > 1;
+
+        // We Love The King Day (WLTKD): Size >= 6, no unhappy, more happy than content
+        IsWLTKD = !IsInDisorder && Population >= 6 && UnhappyCitizens == 0 && HappyCitizens >= ContentCitizens;
     }
 
     public City(string id, string name, int x, int y, int foundedYear, Faction faction = Faction.Player, string? civilizationId = null)

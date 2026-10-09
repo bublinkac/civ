@@ -158,6 +158,37 @@ public partial class ForeignAdvisorPanel : PanelContainer
         {
             aiRow.Modulate = new Color(1.0f, 0.85f, 0.85f);
         }
+        
+        var btnBox = new HBoxContainer();
+        btnBox.AddThemeConstantOverride("separation", 10);
+
+        var tradeBtn = new Button { Text = "Diplomacy", CustomMinimumSize = new Vector2(80, 25) };
+        tradeBtn.Pressed += () => 
+        {
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
+            var diag = new DiplomacyDialog(_sim, Faction.AiRival);
+            AddChild(diag);
+        };
+        btnBox.AddChild(tradeBtn);
+
+        var spyBtn = new Button { Text = "Espionage", CustomMinimumSize = new Vector2(80, 25) };
+        spyBtn.Pressed += () =>
+        {
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
+            var espDiag = new EspionageScreen(_sim);
+            AddChild(espDiag);
+        };
+        btnBox.AddChild(spyBtn);
+
+        if (_sim.Diplomacy.HasSpy(Faction.Player, Faction.AiRival))
+        {
+            var spyIcon = new Label { Text = "👁️" };
+            spyIcon.AddThemeColorOverride("font_color", new Color(0.2f, 0.8f, 0.2f));
+            btnBox.AddChild(spyIcon);
+        }
+
+        aiRow.AddChild(btnBox);
+
         tableVBox.AddChild(aiRow);
 
         // --- FUTURE: More civs will be listed here ---

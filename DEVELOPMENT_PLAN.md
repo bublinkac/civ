@@ -456,10 +456,135 @@ Full 6-advisor system matching Civ3's F1-F6 keybinding layout.
 - [x] **F8 keyboard shortcut**
 - [x] `open_histograph` action handler in MapRenderer
 
+---
+
+## Phase 33: Audio System & Sound Manager (COMPLETED)
+
+### Core Manager (`src/Audio/AudioManager.cs`)
+- [x] **Singleton/AutoLoad architecture** — accessible globally across scenes.
+- [x] **Graceful degradation** — checks `ResourceLoader.Exists` to fail silently when audio files are missing, preventing engine crashes/errors.
+- [x] **Music & SFX support** — separate stream players for BGM and dynamically instantiated nodes for concurrent SFX playback.
+
+### UI Integration
+- [x] **Main Menu** — Hover (`hover.wav`) and Click (`click.wav`) sounds on classic buttons.
+- [x] **Game HUD** — End turn button sound effect (`ui_turn_end.wav`).
+- [x] **Advisor Screen** — Tab switching (`advisor_tab.wav`), Open (`ui_advisor_open.wav`), and Close button (`close.wav`) sounds.
+- [x] **City Production Dialog** — Build item click (`build.wav`) and Close button (`close.wav`) sounds.
+- [x] **Map Interaction** — Left click (`ui_click.wav`), Unit Move/Attack (`unit_move.wav`), Invalid action (`ui_error.wav`), City Founded (`city_founded.wav`), Worker Build (`worker_build.wav`), Save Game (`ui_save.wav`).
+
 ### Future TODOs
 - Trade Advisor: Trade route visualization, luxury/strategic resource deals, import/export
-- Foreign Advisor: Embassy system, tech/map trading, alliance proposals, multi-civ support
 - Cultural Advisor: Culture borders map overlay, culture flip warnings, culture rate graph
 - Happiness: Entertainment slider, We Love The King Day (WLTKD), Entertainers specialist
 
+---
 
+## Phase 34: Trade & Diplomacy Engine (COMPLETED)
+
+### Core Systems (`src/Core/Diplomacy/`)
+- [x] **`TradeDeal` Model**: Comprehensive deal structure tracking both instantaneous (Techs, Lump Sum Gold, Maps) and recurring elements (Gold Per Turn, Treaties, Resources).
+- [x] **`DiplomacyManager` Engine**: 
+    - Real-time processing of instantaneous transfers (Tech/Map/Gold) upon deal acceptance.
+    - Turn-based tick system to process recurring Gold Per Turn transfers.
+    - Automatic cancellation of active trade deals when war is declared.
+    - Embassy logic with flat-cost initialization.
+- [x] **Simulation Integration**: Seamlessly integrated `DiplomacyManager` into the `GameSimulation` lifecycle, firing `ProcessTurnEnd` just before `TurnNumber++`.
+
+### User Interface (`src/UI/`)
+- [x] **`DiplomacyDialog` Screen**: 
+    - Full-featured, Civ-style bilateral trading screen.
+    - Dynamic "We Offer" vs "They Offer" tables showing proposed deal items.
+    - Instantaneous AI evaluation logic (protoyped to accept deals equal or greater in value).
+    - Polished Godot UI with parchment theming, close animations, and audio (`click.wav` on buttons).
+- [x] **Foreign Advisor Hooks**: 
+    - Added "Diplomacy" button in `ForeignAdvisorPanel` directly tied to known rival civilizations.
+    - Triggers the immersive `DiplomacyDialog` modal when pressed.
+
+## Phase 35: Espionage & Intelligence Agency (COMPLETED)
+
+### 1. Espionage System UI (`EspionageScreen.cs`)
+- [x] Create a dedicated modal window for Espionage (similar to Diplomacy Dialog).
+- [x] List available espionage missions (Establish Embassy, Investigate City, Plant Spy, Steal Technology, Sabotage Production).
+- [x] Display mission costs dynamically based on target city population/production.
+- [x] Add a confirmation dialog showing success probabilities and treasury cost.
+
+### 2. Integration with HUD & Map
+- [x] Add an Espionage "E" button next to city headers, or allow double-clicking an enemy capital to open the Espionage Screen (Added to GameHud and MapRenderer).
+- [x] Connect the "Establish Embassy" action from the Foreign Advisor directly to the Espionage system.
+- [x] Add audio cues (`spy_success.wav`, `spy_fail.wav`) using `AudioManager`.
+- [x] **New**: Added a 👁️ (Spy) icon to the Foreign Advisor row when a spy is successfully planted.
+
+### 3. Logic Refinements
+- [x] Ensure `EspionageSystem.ExecuteMission()` updates the UI appropriately and disables actions that are already done.
+- [x] Ensure `Intelligence Agency` Small Wonder correctly unlocks the "Plant Spy" action.
+- [x] Implemented proper `HasEmbassy` and `HasSpy` tracking in `DiplomacyManager.cs`.
+
+---
+
+## Phase 36: Advanced Unit Commands (COMPLETED)
+
+### 1. Fortify & Sentry Actions
+- [x] Implement `Fortify` action (Grants defensive bonus, skips turns until awakened or attacked).
+- [x] Implement `Sentry` action (Unit sleeps until an enemy unit enters its vision range).
+- [x] Update `UnitRenderer.cs` to show fortify/sentry indicators (e.g., small shield or Zzz icon).
+
+### 2. Pillage Action
+- [x] Allow military units to destroy improvements (roads, mines, irrigation) in enemy or neutral territory.
+- [x] Add `Pillage` button to the Unit Actions UI panel.
+- [x] Implement `pillage.wav` sound effect via `AudioManager`.
+
+### 3. Automation (Workers & Explorers)
+- [x] Implement "Automate Worker" command.
+- [x] Implement "Explore" command for Scouts/Naval units to automatically uncover the map.
+
+---
+
+## Phase 37: Specialists in Cities (COMPLETED)
+
+### 1. Specialist Core Logic
+- [x] Add `SpecialistType` enum (None, Entertainer, Scientist, TaxCollector, CivilEngineer, Policeman).
+- [x] Add specialist tracking to `City.cs` (e.g. `List<SpecialistType> Specialists`).
+- [x] Ensure Population = working citizens + specialists.
+- [x] Add logic in `City.CollectCityYields` to calculate specialist bonuses (Entertainer = +1 Luxury, Scientist = +3 Science, TaxCollector = +2 Gold, etc.).
+
+### 2. UI Integration (CityDialog)
+- [x] Add a "Specialists" UI section in `CityDialog.cs` showing how many citizens are assigned to which specialist type.
+- [x] Allow clicking on working citizens to turn them into specialists, and clicking specialists to put them back to work.
+- [x] Display the specialist icon/portrait or a label.
+
+### 3. AI Usage
+- [x] Update `AiRivalBrain.cs` so the AI assigns Entertainers when a city is in disorder or about to fall into disorder.
+- [x] Update AI to reassign working citizens to specialists when there are no good tiles left to work.
+
+---
+
+## Phase 38: Unit Upgrades & Veterancy (COMPLETED)
+
+### 1. Veterancy System
+- [x] Use existing `ExperienceLevel` (Conscript, Regular, Veteran, Elite).
+- [x] Add logic in `GameSimulation.ResolveCombat`: winning unit has a chance to promote to the next experience level.
+- [x] Elite units have a chance to spawn a Great Leader upon winning a combat.
+- [x] Show HP bars correctly based on experience (Conscript: 2HP, Regular: 3HP, Veteran: 4HP, Elite: 5HP).
+
+### 2. Unit Upgrades
+- [x] Add `UpgradesTo` property to `UnitDefinition` (e.g. Spearman upgrades to Pikeman).
+- [x] Add `UpgradeCost` formula (e.g. difference in shield cost * 3 gold).
+- [x] Add "Upgrade Unit" command to Unit Actions HUD (Shift-U for all, U for one).
+- [x] Ensure unit can only upgrade in a City with a Barracks and required strategic resources.
+- [x] Deduct gold and replace the unit type upon upgrade.
+
+---
+
+## Phase 39: Golden Ages (COMPLETED)
+
+### 1. Core Mechanics
+- [x] Track `HasHadGoldenAge` and `GoldenAgeTurnsRemaining` (20 turns) per faction.
+- [x] Apply Golden Age yield bonuses (+1 shield to tiles producing >=1 shield, +1 commerce to tiles producing >=1 commerce).
+
+### 2. Triggers
+- [x] Trigger on Unique Unit combat victory.
+- [x] Trigger on Great Wonder completion (if wonder traits match civilization traits).
+
+### 3. UI/Visuals
+- [x] Show a notification when it starts/ends.
+- [x] Update City UI (CityProductionQueueComponent) to reflect the Golden Age bonus yields.

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CivGame.Core.Pathfinding;
 using CivGame.Core.AI;
+using CivGame.Core.Diplomacy;
 
 namespace CivGame.Core;
 
@@ -22,7 +23,12 @@ public class GameSimulation
         public FogState[,] VisibilityGrid { get; }
         public int TurnNumber { get; private set; } = 1;
         public List<(int X, int Y)> BarbarianCamps { get; } = new();
+        public List<(int X, int Y)> GoodyHuts { get; } = new();
         public TechManager Research { get; } = new();
+        public EspionageSystem Espionage { get; private set; }
+        
+        private DiplomacyManager _diplomacy;
+        public DiplomacyManager Diplomacy => _diplomacy ??= new DiplomacyManager(this);
         public bool IsAtWarWithAi { get; set; } = false;
         public GameEndState EndState { get; private set; } = GameEndState.None;
         public const int MaxTurnLimit = 50;
@@ -57,6 +63,10 @@ public class GameSimulation
         public int LastTurnUnitSupport { get; private set; } = 0;
         public int LastTurnScience { get; private set; } = 0;
         public int LastTurnNetGold { get; private set; } = 0;
+
+        // Trade Networks & Resource Pooling
+        public Dictionary<int, HashSet<string>> TradeNetworkResources { get; } = new();
+        public Dictionary<string, int> CityTradeNetworks { get; } = new(); // CityId -> TradeNetworkId
 
         // Wonder tracking
         public HashSet<string> CompletedWonderIds { get; } = new();
@@ -144,6 +154,7 @@ public class GameSimulation
 
         Map = map;
         VisibilityGrid = new FogState[map.Width, map.Height];
+        Espionage = new EspionageSystem(this);
         
         // Initialize all tiles as completely Unexplored
         for (int x = 0; x < map.Width; x++)
@@ -156,6 +167,41 @@ public class GameSimulation
 
         // Procedurally spawn 3 Barbarian Camps on land, far from center starting area
         SpawnInitialBarbarianCamps();
+
+        // Procedurally spawn Goody Huts
+        SpawnInitialGoodyHuts();
+    }
+
+    private void SpawnInitialGoodyHuts()
+    {
+        int centerX = Map.Width / 2;
+        int centerY = Map.Height / 2;
+        var rand = new Random(84); // Seeded random
+
+        int targetHuts = (Map.Width * Map.Height) / 50;
+        int hutsSpawned = 0;
+        int attempts = 0;
+
+        while (hutsSpawned < targetHuts && attempts < 500)
+        {
+            attempts++;
+            int rx = rand.Next(2, Map.Width - 2);
+            int ry = rand.Next(2, Map.Height - 2);
+
+            int distFromCenter = Math.Max(Math.Abs(rx - centerX), Math.Abs(ry - centerY));
+            if (distFromCenter < 5) continue; // Keep clear of immediate starting area
+
+            var tile = Map.GetTile(rx, ry);
+            if (tile != null && tile.IsLand && tile.Terrain.Id != "mountain" && tile.Terrain.Id != "volcano")
+            {
+                if (!BarbarianCamps.Contains((rx, ry)) && !GoodyHuts.Contains((rx, ry)))
+                {
+                    GoodyHuts.Add((rx, ry));
+                    hutsSpawned++;
+                }
+            }
+        }
+        Console.WriteLine($"[Setup] Spawned {hutsSpawned} Goody Huts.");
     }
 
     private void SpawnInitialBarbarianCamps()
@@ -516,32 +562,140 @@ public class GameSimulation
         Cities.Add(city);
         Units.Remove(unit); // Consume settler
 
-        ClaimCityTerritory(city);
+        CalculateCulturalBorders();
         UpdateVisibility();
         return city;
     }
 
-    public void ClaimCityTerritory(City city, int radius = 1)
+    public void CalculateCulturalBorders()
     {
-        for (int dx = -radius; dx <= radius; dx++)
+        var highestCulture = new System.Collections.Generic.Dictionary<TileData, (string CityId, int Culture)>();
+
+        foreach (var city in Cities)
         {
-            for (int dy = -radius; dy <= radius; dy++)
+            int radius = 1;
+            if (city.Buildings.Any(b => b.Id == "monument" || b.Id == "temple")) radius = Math.Max(radius, 2);
+            if (city.AccumulatedCulture >= 10000) radius = Math.Max(radius, 5);
+            else if (city.AccumulatedCulture >= 1000) radius = Math.Max(radius, 4);
+            else if (city.AccumulatedCulture >= 100) radius = Math.Max(radius, 3);
+            else if (city.AccumulatedCulture >= 10) radius = Math.Max(radius, 2);
+
+            for (int dx = -radius; dx <= radius; dx++)
             {
-                int tx = city.X + dx;
-                int ty = city.Y + dy;
-                if (Map.IsInBounds(tx, ty))
+                for (int dy = -radius; dy <= radius; dy++)
                 {
-                    var tile = Map.GetTile(tx, ty);
-                    // Cities only claim land tiles and unclaimed tiles
-                    if (tile != null && tile.IsLand)
+                    int tx = city.X + dx;
+                    int ty = city.Y + dy;
+                    if (Map.IsInBounds(tx, ty))
                     {
-                        if (string.IsNullOrEmpty(tile.OwnerCityId))
+                        var tile = Map.GetTile(tx, ty);
+                        if (tile != null && tile.IsLand)
                         {
-                            tile.OwnerCityId = city.Id;
+                            if (dx == 0 && dy == 0)
+                            {
+                                highestCulture[tile] = (city.Id, int.MaxValue);
+                                continue;
+                            }
+                            
+                            int dist = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                            int influence = city.AccumulatedCulture / Math.Max(1, dist);
+                            if (influence == 0) influence = 1; // base 1 influence for newly founded cities
+
+                            if (!highestCulture.ContainsKey(tile) || highestCulture[tile].Culture < influence)
+                            {
+                                highestCulture[tile] = (city.Id, influence);
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // Apply ownerships globally
+        for (int x = 0; x < Map.Width; x++)
+        {
+            for (int y = 0; y < Map.Height; y++)
+            {
+                var tile = Map.GetTile(x, y);
+                if (tile != null && tile.IsLand)
+                {
+                    if (highestCulture.TryGetValue(tile, out var claim))
+                    {
+                        tile.OwnerCityId = claim.CityId;
+                    }
+                    else
+                    {
+                        tile.OwnerCityId = null;
+                    }
+                }
+            }
+        }
+    }
+
+    public void CheckCulturalFlipping()
+    {
+        var flippedCities = new System.Collections.Generic.List<(City City, Faction NewFaction)>();
+
+        foreach (var city in Cities)
+        {
+            if (city.IsCapital) continue; // Capitals do not flip
+
+            var centerTile = Map.GetTile(city.X, city.Y);
+            if (centerTile == null) continue;
+
+            Faction? bestFaction = null;
+            int maxEnemyInfluence = 0;
+
+            foreach (var otherCity in Cities)
+            {
+                if (otherCity.Faction == city.Faction) continue;
+
+                int dist = Math.Max(Math.Abs(city.X - otherCity.X), Math.Abs(city.Y - otherCity.Y));
+                
+                int radius = 1;
+                if (otherCity.AccumulatedCulture >= 10000) radius = 5;
+                else if (otherCity.AccumulatedCulture >= 1000) radius = 4;
+                else if (otherCity.AccumulatedCulture >= 100) radius = 3;
+                else if (otherCity.AccumulatedCulture >= 10) radius = 2;
+
+                if (dist <= radius)
+                {
+                    int influence = otherCity.AccumulatedCulture / Math.Max(1, dist);
+                    if (influence > maxEnemyInfluence)
+                    {
+                        maxEnemyInfluence = influence;
+                        bestFaction = otherCity.Faction;
+                    }
+                }
+            }
+
+            if (bestFaction.HasValue && maxEnemyInfluence > city.AccumulatedCulture)
+            {
+                // Chance to flip (max 5% per turn)
+                double chance = Math.Min(0.05, (maxEnemyInfluence - city.AccumulatedCulture) / 10000.0);
+                if (Random.Shared.NextDouble() < chance)
+                {
+                    flippedCities.Add((city, bestFaction.Value));
+                }
+            }
+        }
+
+        foreach (var flip in flippedCities)
+        {
+            var city = flip.City;
+            var oldFaction = city.Faction;
+            city.Faction = flip.NewFaction;
+
+            // Destroy all garrisoned units of the old faction
+            var garrison = Units.Where(u => u.X == city.X && u.Y == city.Y && u.Faction == oldFaction).ToList();
+            foreach (var u in garrison) DestroyUnit(u);
+
+            // Spawn 1 defensive unit for the new faction
+            UnitType defUnit = TurnNumber > 100 ? UnitType.Infantry : (TurnNumber > 50 ? UnitType.Musketman : UnitType.Spearman);
+            var guard = new Unit(Guid.NewGuid().ToString(), defUnit, city.X, city.Y, flip.NewFaction);
+            Units.Add(guard);
+
+            Console.WriteLine($"[CULTURE FLIP] The city of {city.Name} has revolted against {oldFaction} and joined {flip.NewFaction} due to cultural influence!");
         }
     }
 
@@ -713,9 +867,13 @@ public class GameSimulation
         return MoveValidationResult.Valid();
     }
 
+
     public bool MoveUnit(Unit unit, int targetX, int targetY)
     {
         if (!ValidateUnitMove(unit, targetX, targetY).IsValid) return false;
+
+        unit.IsFortified = false;
+        unit.IsSentry = false;
 
         var tile = Map.GetTile(targetX, targetY)!;
 
@@ -754,6 +912,23 @@ public class GameSimulation
 
         CheckTerritoryIntrusion(unit, targetX, targetY);
 
+        // Check for Goody Hut
+        if (GoodyHuts.Contains((targetX, targetY)) && unit.Domain == UnitDomain.Land)
+        {
+            ExploreGoodyHut(unit, targetX, targetY);
+        }
+
+        // Check for Barbarian Camp
+        if (BarbarianCamps.Contains((targetX, targetY)) && unit.Faction != Faction.Barbarian && unit.Domain == UnitDomain.Land)
+        {
+            BarbarianCamps.Remove((targetX, targetY));
+            if (unit.Faction == Faction.Player)
+            {
+                PlayerTreasury += 25;
+                Console.WriteLine($"[Barbarian Camp] {unit.Type} dispersed a barbarian camp at ({targetX}, {targetY}) and collected 25 gold!");
+            }
+        }
+
         // Normal movement
         float moveCost = GetTileMovementCostForUnit(tile, unit);
         unit.MoveTo(targetX, targetY, moveCost);
@@ -779,6 +954,69 @@ public class GameSimulation
 
         CheckGameEndConditions();
         return true;
+    }
+
+    private void ExploreGoodyHut(Unit unit, int x, int y)
+    {
+        GoodyHuts.Remove((x, y));
+        if (unit.Faction != Faction.Player) return;
+
+        var rand = new Random(TurnNumber * (x+1) * (y+1));
+        int roll = rand.Next(100);
+
+        bool isExpansionist = unit.Faction == Faction.Player && (PlayerCiv.Trait1 == CivTrait.Expansionist || PlayerCiv.Trait2 == CivTrait.Expansionist);
+
+        if (roll < 20 && !isExpansionist)
+        {
+            // Barbarians
+            Console.WriteLine("[Goody Hut] Ambush! Barbarians sprang from the village!");
+            BarbarianCamps.Add((x, y));
+            for(int i=0; i<2; i++) {
+                string barbId = $"barb_{Guid.NewGuid().ToString().Substring(0, 8)}";
+                Units.Add(new Unit(barbId, UnitType.Barbarian, x, y, Faction.Barbarian));
+            }
+        }
+        else if (roll < 45 || (roll < 20 && isExpansionist))
+        {
+            // Gold
+            int gold = rand.Next(25, 101);
+            PlayerTreasury += gold;
+            Console.WriteLine($"[Goody Hut] You found {gold} gold in a deserted village!");
+        }
+        else if (roll < 70)
+        {
+            // Map
+            Console.WriteLine("[Goody Hut] The villagers provided you with a map of the surrounding area!");
+            int revealRadius = 4;
+            for (int dx = -revealRadius; dx <= revealRadius; dx++)
+            {
+                for (int dy = -revealRadius; dy <= revealRadius; dy++)
+                {
+                    int nx = x + dx;
+                    int ny = y + dy;
+                    if (nx >= 0 && nx < Map.Width && ny >= 0 && ny < Map.Height)
+                    {
+                        if (Math.Abs(dx) + Math.Abs(dy) <= revealRadius * 1.5)
+                        {
+                            VisibilityGrid[nx, ny] = FogState.Visible;
+                        }
+                    }
+                }
+            }
+        }
+        else if (roll < 90)
+        {
+            // Unit
+            Console.WriteLine("[Goody Hut] A skilled warrior joins your expedition!");
+            string newId = $"warrior_{Guid.NewGuid().ToString().Substring(0, 8)}";
+            Units.Add(new Unit(newId, UnitType.Warrior, x, y, Faction.Player));
+        }
+        else
+        {
+            // Tech (simplified)
+            Console.WriteLine("[Goody Hut] The villagers shared their knowledge of a new technology!");
+            LastTurnScience += 50; 
+        }
     }
 
     public bool IsHostile(Unit a, Unit b)
@@ -895,6 +1133,12 @@ public class GameSimulation
                     Console.WriteLine($"[Combat] {defender.Type} receives +100% defense bonus from Barricade!");
                 }
             }
+
+            if (defTile.HasRiver)
+            {
+                defStrength *= 1.25f;
+                Console.WriteLine($"[Combat] {defender.Type} receives +25% defense bonus from River!");
+            }
         }
 
         // The Pentagon effect: Defender gets +25% defense strength globally if their faction completed it
@@ -954,10 +1198,7 @@ public class GameSimulation
 
                 Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
                 
-                FactionsWithVictoriousUnit.Add(attacker.Faction);
-
-                // Golden Age trigger: first UU combat victory
-                CheckUniqueUnitGoldenAgeTrigger(attacker);
+                HandleCombatVictory(attacker);
             }
         }
 
@@ -973,17 +1214,71 @@ public class GameSimulation
             // Defender wins and is registered as victorious
             if (!defenderDied)
             {
-                FactionsWithVictoriousUnit.Add(defender.Faction);
-
-                // Golden Age trigger: first UU combat victory
-                CheckUniqueUnitGoldenAgeTrigger(defender);
+                HandleCombatVictory(defender);
             }
         }
 
-        // Combat consumes all remaining movement points for the attacker
+        // Combat consumes movement points. Blitz units and Armies consume 1 point, others consume all.
         if (!attackerDied)
         {
-            attacker.RemainingMovement = 0;
+            // Simple blitz check: Army or Tank/ModernArmor/MechInfantry
+            bool hasBlitz = attacker.Type == UnitType.Army || 
+                            attacker.Type == UnitType.Tank || 
+                            attacker.Type == UnitType.Panzer || 
+                            attacker.Type == UnitType.ModernArmor || 
+                            attacker.Type == UnitType.MechInfantry;
+
+            if (hasBlitz)
+            {
+                attacker.RemainingMovement = Math.Max(0, attacker.RemainingMovement - 1.0f);
+            }
+            else
+            {
+                attacker.RemainingMovement = 0;
+            }
+        }
+    }
+
+    private void HandleCombatVictory(Unit unit)
+    {
+        FactionsWithVictoriousUnit.Add(unit.Faction);
+        CheckUniqueUnitGoldenAgeTrigger(unit);
+
+        // Promotion
+        if (unit.Experience != ExperienceLevel.Elite)
+        {
+            bool militaristic = unit.Civilization != null && 
+                (unit.Civilization.Trait1 == CivTrait.Militaristic || unit.Civilization.Trait2 == CivTrait.Militaristic);
+            
+            int promoteChance = unit.Experience == ExperienceLevel.Veteran ? 25 : 50;
+            if (militaristic) promoteChance = Math.Min(100, promoteChance * 2);
+
+            if (Random.Shared.Next(100) < promoteChance)
+            {
+                unit.Experience++;
+                unit.MaxHealth += 20; 
+                unit.Health += 20;
+                Console.WriteLine($"[Promotion] {unit.Type} promoted to {unit.Experience}!");
+            }
+        }
+        else
+        {
+            // Elite -> Great Leader spawn check
+            if (!unit.HasGeneratedLeader)
+            {
+                bool hasHeroicEpic = Cities.Any(c => c.Faction == unit.Faction && c.Buildings.Any(b => b.Id == "heroic_epic"));
+                int leaderChance = hasHeroicEpic ? 8 : 6;
+
+                bool hasLeader = Units.Any(u => u.Faction == unit.Faction && u.Type == UnitType.GreatLeader);
+
+                if (!hasLeader && Random.Shared.Next(100) < leaderChance)
+                {
+                    unit.HasGeneratedLeader = true;
+                    var leader = new Unit(Guid.NewGuid().ToString(), UnitType.GreatLeader, unit.X, unit.Y, unit.Faction, unit.CivilizationId);
+                    Units.Add(leader);
+                    Console.WriteLine($"[Great Leader] A Great Leader has emerged for {unit.Faction} at ({unit.X},{unit.Y})!");
+                }
+            }
         }
     }
 
@@ -1009,6 +1304,33 @@ public class GameSimulation
         }
 
         Units.Remove(unit);
+    }
+
+    public bool CreateArmy(Unit leader)
+    {
+        if (leader.Type != UnitType.GreatLeader) return false;
+        
+        var army = new Unit(leader.Id, UnitType.Army, leader.X, leader.Y, leader.Faction, leader.CivilizationId);
+        Units.Remove(leader);
+        Units.Add(army);
+        
+        Console.WriteLine($"[Great Leader] {leader.Faction} formed an Army at ({leader.X},{leader.Y})!");
+        return true;
+    }
+
+    public bool HurryProductionWithLeader(Unit leader, City city)
+    {
+        if (leader.Type != UnitType.GreatLeader) return false;
+        if (city.Faction != leader.Faction) return false;
+        if (leader.X != city.X || leader.Y != city.Y) return false;
+
+        if (city.CurrentProject == ProductionProject.None) return false;
+
+        city.CurrentProductionProgress = city.GetProjectCost(city.CurrentProject);
+        Console.WriteLine($"[Great Leader] {leader.Faction}'s Great Leader rushed production of {city.CurrentProject} in {city.Name}!");
+        
+        Units.Remove(leader);
+        return true;
     }
 
     public bool IsHostileToFaction(Faction a, Faction b)
@@ -1075,6 +1397,32 @@ public class GameSimulation
                 }
             }
         }
+    }
+    public bool ExecutePillage(Unit unit)
+    {
+        if (unit.RemainingMovement <= 0) return false;
+        var tile = Map.GetTile(unit.X, unit.Y);
+        if (tile == null) return false;
+
+        bool pillaged = false;
+        // Pillage priority: Road -> Irrigation/Mine -> Base
+        if (tile.HasRoad)
+        {
+            tile.HasRoad = false;
+            pillaged = true;
+        }
+        else if (tile.Improvement != null)
+        {
+            tile.Improvement = null;
+            pillaged = true;
+        }
+
+        if (pillaged)
+        {
+            unit.RemainingMovement = 0;
+            return true;
+        }
+        return false;
     }
 
     public bool ExecuteBombard(Unit unit, int targetX, int targetY)
@@ -1359,8 +1707,8 @@ public class GameSimulation
                 var adj = Map.GetTile(nx, ny);
                 if (adj == null) continue;
 
-                // Fresh water source: coast, floodplains
-                if (adj.Terrain.Id == "coast" || adj.Terrain.Id == "floodplains")
+                // Fresh water source: coast, floodplains, river
+                if (adj.Terrain.Id == "coast" || adj.Terrain.Id == "floodplains" || adj.HasRiver)
                     return true;
 
                 // City acts as irrigation source
@@ -1953,7 +2301,12 @@ public class GameSimulation
         // 3.10 Record Histograph data for this turn
         Histograph.RecordTurn(this);
 
+        // 3.11 Process active trade deals
+        Diplomacy.ProcessTurnEnd();
+
         TurnNumber++;
+        CalculateTradeNetworks();
+
         foreach (var unit in Units)
         {
             unit.ResetMovement();
@@ -1961,6 +2314,11 @@ public class GameSimulation
         int scienceGenerated = CollectCityYields();
         Research.AddScience(scienceGenerated, this);
         
+        CalculateCulturalBorders();
+        CheckCulturalFlipping();
+
+        ProcessAutomatedUnits();
+
         UpdateVisibility();
 
         // 4. Check for game end conditions
@@ -2232,39 +2590,32 @@ public class GameSimulation
         var luxuries = new HashSet<string>();
         foreach (var city in Cities.Where(c => c.Faction == Faction.Player))
         {
-            // Check city tile and worked tiles
-            for (int dx = -2; dx <= 2; dx++)
+            foreach (var lux in GetCityConnectedLuxuries(city))
             {
-                for (int dy = -2; dy <= 2; dy++)
-                {
-                    if (Math.Abs(dx) + Math.Abs(dy) > 2) continue;
-                    int tx = city.X + dx;
-                    int ty = city.Y + dy;
-                    var tile = Map.GetTile(tx, ty);
-                    if (tile?.Resource is LuxuryResource lux && tile.OwnerCityId == city.Id)
-                        luxuries.Add(lux.Id);
-                }
+                luxuries.Add(lux);
             }
         }
         return luxuries.Count;
     }
 
     /// <summary>
-    /// Get the set of luxury resource IDs connected to a specific city.
+    /// Get the set of luxury resource IDs connected to a specific city via Trade Networks.
     /// </summary>
     public HashSet<string> GetCityConnectedLuxuries(City city)
     {
         var luxuries = new HashSet<string>();
-        for (int dx = -2; dx <= 2; dx++)
+        if (CityTradeNetworks.TryGetValue(city.Id, out int networkId))
         {
-            for (int dy = -2; dy <= 2; dy++)
+            if (TradeNetworkResources.TryGetValue(networkId, out var resources))
             {
-                if (Math.Abs(dx) + Math.Abs(dy) > 2) continue;
-                int tx = city.X + dx;
-                int ty = city.Y + dy;
-                var tile = Map.GetTile(tx, ty);
-                if (tile?.Resource is LuxuryResource lux && tile.OwnerCityId == city.Id)
-                    luxuries.Add(lux.Id);
+                foreach (var resId in resources)
+                {
+                    var res = ResourceRegistry.Get(resId);
+                    if (res != null && res.Category == ResourceCategory.Luxury)
+                    {
+                        luxuries.Add(resId);
+                    }
+                }
             }
         }
         return luxuries;
@@ -2333,6 +2684,37 @@ public class GameSimulation
                             tile.IsPolluted = false;
                             Console.WriteLine($"[Construction Completed] Pollution cleaned up at ({unit.X}, {unit.Y})!");
                         }
+                        else if (improvement is ClearForest)
+                        {
+                            tile.Terrain = TerrainRegistry.Get("grassland")!;
+                            tile.Improvement = null;
+                            var nearestCity = Cities.Where(c => c.Faction == unit.Faction)
+                                                    .OrderBy(c => Math.Abs(c.X - unit.X) + Math.Abs(c.Y - unit.Y))
+                                                    .FirstOrDefault();
+                            if (nearestCity != null)
+                            {
+                                nearestCity.CurrentProductionProgress += 10;
+                                Console.WriteLine($"[Worker] Cleared forest at ({unit.X}, {unit.Y})! +10 Shields to {nearestCity.Name}.");
+                            }
+                        }
+                        else if (improvement is ClearJungle)
+                        {
+                            tile.Terrain = TerrainRegistry.Get("grassland")!;
+                            tile.Improvement = null;
+                            Console.WriteLine($"[Worker] Cleared jungle at ({unit.X}, {unit.Y})!");
+                        }
+                        else if (improvement is ClearMarsh)
+                        {
+                            tile.Terrain = TerrainRegistry.Get("grassland")!;
+                            tile.Improvement = null;
+                            Console.WriteLine($"[Worker] Cleared marsh at ({unit.X}, {unit.Y})!");
+                        }
+                        else if (improvement is PlantForest)
+                        {
+                            tile.Terrain = TerrainRegistry.Get("forest")!;
+                            tile.Improvement = null;
+                            Console.WriteLine($"[Worker] Planted forest at ({unit.X}, {unit.Y})!");
+                        }
                         else
                         {
                             tile.Improvement = improvement;
@@ -2341,6 +2723,87 @@ public class GameSimulation
                     }
 
                     unit.CancelImprovement(); // Reset worker state
+                }
+            }
+        }
+    }
+
+    private void ProcessAutomatedUnits()
+    {
+        var rng = new Random();
+        foreach (var unit in Units.ToList())
+        {
+            if (!unit.IsAutomated || unit.RemainingMovement <= 0) continue;
+
+            // Get valid neighbors
+            var neighbors = new List<(int X, int Y)>();
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int nx = unit.X + dx;
+                    int ny = unit.Y + dy;
+                    if (nx >= 0 && nx < Map.Width && ny >= 0 && ny < Map.Height)
+                    {
+                        neighbors.Add((nx, ny));
+                    }
+                }
+            }
+
+            if (unit.Type == UnitType.Explorer || unit.Type == UnitType.Warrior || unit.Type == UnitType.Archer)
+            {
+                var unrevealed = neighbors.Where(t => VisibilityGrid[t.X, t.Y] == FogState.Unexplored).ToList();
+                if (unrevealed.Count > 0)
+                {
+                    var target = unrevealed[rng.Next(unrevealed.Count)];
+                    if (MoveUnit(unit, target.X, target.Y))
+                    {
+                        Console.WriteLine($"[Auto-Explore] {unit.Type} explored {target.X},{target.Y}");
+                    }
+                }
+                else
+                {
+                    var validNeighbors = neighbors.Where(t => CanMoveUnit(unit, t.X, t.Y)).ToList();
+                    if (validNeighbors.Count > 0)
+                    {
+                        var target = validNeighbors[rng.Next(validNeighbors.Count)];
+                        MoveUnit(unit, target.X, target.Y);
+                    }
+                }
+            }
+            else if (unit.Type == UnitType.Worker)
+            {
+                var tile = Map.GetTile(unit.X, unit.Y);
+                if (tile != null)
+                {
+                    if (!tile.HasRoad)
+                    {
+                        unit.StartImprovement(new RoadBuild());
+                        Console.WriteLine($"[Auto-Worker] Started road at {unit.X},{unit.Y}");
+                    }
+                    else if (tile.Improvement == null && tile.Terrain.Id == "grassland")
+                    {
+                        if (HasIrrigationAccess(unit.X, unit.Y))
+                        {
+                            unit.StartImprovement(new Farm());
+                            Console.WriteLine($"[Auto-Worker] Started farm at {unit.X},{unit.Y}");
+                        }
+                        else
+                        {
+                            unit.StartImprovement(new Mine());
+                            Console.WriteLine($"[Auto-Worker] Started mine at {unit.X},{unit.Y}");
+                        }
+                    }
+                    else
+                    {
+                        var validNeighbors = neighbors.Where(t => CanMoveUnit(unit, t.X, t.Y)).ToList();
+                        if (validNeighbors.Count > 0)
+                        {
+                            var target = validNeighbors[rng.Next(validNeighbors.Count)];
+                            MoveUnit(unit, target.X, target.Y);
+                        }
+                    }
                 }
             }
         }
@@ -2394,6 +2857,41 @@ public class GameSimulation
         int barbInterval = DifficultyConfig.BarbarianSpawnInterval;
         if (barbInterval > 0 && TurnNumber % barbInterval == 0)
         {
+            // Spawn new camps in shrouded/unexplored areas
+            var rand = new Random(TurnNumber * 1234);
+            int campSpawnChance = 10; // 10% chance to spawn a new camp per tick
+            if (rand.Next(100) < campSpawnChance)
+            {
+                var validTiles = new List<(int X, int Y)>();
+                for (int x = 0; x < Map.Width; x++)
+                {
+                    for (int y = 0; y < Map.Height; y++)
+                    {
+                        var t = Map.GetTile(x, y);
+                        if (t != null && t.IsLand && t.Terrain.Id != "mountain" && t.Terrain.Id != "volcano")
+                        {
+                            if (VisibilityGrid[x, y] == FogState.Shrouded || VisibilityGrid[x, y] == FogState.Unexplored)
+                            {
+                                if (!Cities.Any(c => Math.Abs(c.X - x) + Math.Abs(c.Y - y) < 4)) // Keep away from cities
+                                {
+                                    validTiles.Add((x, y));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (validTiles.Count > 0)
+                {
+                    var newCamp = validTiles[rand.Next(validTiles.Count)];
+                    if (!BarbarianCamps.Contains(newCamp))
+                    {
+                        BarbarianCamps.Add(newCamp);
+                        Console.WriteLine($"[Barbarians] A new barbarian camp emerged in the wilderness!");
+                    }
+                }
+            }
+
             foreach (var camp in BarbarianCamps)
             {
                 // Ensure no unit is blocking the camp tile before spawning
@@ -2474,13 +2972,95 @@ public class GameSimulation
         AiRivalBrain.ProcessTurn(this);
     }
 
+    private void AutoAssignTiles(City city)
+    {
+        int unassigned = city.Population - (city.WorkedTiles.Count + city.Specialists.Count);
+        
+        if (unassigned < 0)
+        {
+            while (unassigned < 0 && city.Specialists.Count > 0)
+            {
+                city.Specialists.RemoveAt(city.Specialists.Count - 1);
+                unassigned++;
+            }
+            while (unassigned < 0 && city.WorkedTiles.Count > 0)
+            {
+                var worst = city.WorkedTiles.OrderBy(t => {
+                    var tile = Map.GetTile(t.X, t.Y);
+                    return tile != null ? (tile.TotalYield.Food + tile.TotalYield.Production + tile.TotalYield.Commerce) : 0;
+                }).First();
+                city.WorkedTiles.Remove(worst);
+                unassigned++;
+            }
+        }
+        else if (unassigned > 0)
+        {
+            var potentialTiles = new System.Collections.Generic.List<(int X, int Y)>();
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int tx = city.X + dx;
+                    int ty = city.Y + dy;
+                    if (Map.IsInBounds(tx, ty) && !city.WorkedTiles.Contains((tx, ty)))
+                    {
+                        var tile = Map.GetTile(tx, ty);
+                        if (tile != null && tile.OwnerCityId == city.Id)
+                            potentialTiles.Add((tx, ty));
+                    }
+                }
+            }
+            potentialTiles.Sort((a, b) => {
+                var ta = Map.GetTile(a.X, a.Y);
+                var tb = Map.GetTile(b.X, b.Y);
+                int ya = ta != null ? (ta.TotalYield.Food + ta.TotalYield.Production + ta.TotalYield.Commerce) : 0;
+                int yb = tb != null ? (tb.TotalYield.Food + tb.TotalYield.Production + tb.TotalYield.Commerce) : 0;
+                return yb.CompareTo(ya);
+            });
+
+            foreach(var pt in potentialTiles)
+            {
+                if (unassigned <= 0) break;
+                city.WorkedTiles.Add(pt);
+                unassigned--;
+            }
+            while(unassigned > 0)
+            {
+                city.Specialists.Add(SpecialistType.Entertainer);
+                unassigned--;
+            }
+        }
+    }
+
     private int CollectCityYields()
     {
         int totalCommerceThisTurn = 0;
         int totalMaintenanceThisTurn = 0;
+        int totalSpecialistTaxThisTurn = 0;
+        int totalSpecialistScienceThisTurn = 0;
+
+        // Calculate OCN based on map size
+        int mapSizeTotal = Map.Width * Map.Height;
+        int optimalCityNumber = mapSizeTotal < 4000 ? 14 : 20;
+        if (Difficulty == DifficultyLevel.Deity) optimalCityNumber = (int)(optimalCityNumber * 0.7f);
+
+        // Pre-calculate ranks for corruption
+        var factionRanks = new System.Collections.Generic.Dictionary<City, int>();
+        foreach (var f in new[] { Faction.Player, Faction.AiRival })
+        {
+            var factionCities = Cities.Where(c => c.Faction == f).ToList();
+            factionCities.Sort((a, b) => GetDistanceToNearestCapital(a).CompareTo(GetDistanceToNearestCapital(b)));
+            for (int i = 0; i < factionCities.Count; i++)
+            {
+                factionRanks[factionCities[i]] = i;
+            }
+        }
 
         foreach (var city in Cities)
         {
+            AutoAssignTiles(city);
+
             // Update citizen happiness/mood and accumulate culture
             city.UpdateCitizenMood(this, DifficultyConfig);
 
@@ -2488,13 +3068,7 @@ public class GameSimulation
             city.CultureOutput = cultPerTurn;
             city.AccumulatedCulture += cultPerTurn;
 
-            // Expand cultural borders based on threshold
-            int currentRadius = 1;
-            if (city.AccumulatedCulture >= 10000) currentRadius = 5;
-            else if (city.AccumulatedCulture >= 1000) currentRadius = 4;
-            else if (city.AccumulatedCulture >= 100) currentRadius = 3;
-            else if (city.AccumulatedCulture >= 10) currentRadius = 2;
-            ClaimCityTerritory(city, currentRadius);
+            // Cultural Borders expansion is now handled globally at the end of the turn phase
 
             int food = 0, production = 0, commerce = 0;
 
@@ -2565,58 +3139,14 @@ public class GameSimulation
                 }
             }
 
-            // 4. Citizens work up to Population number of surrounding tiles
-            // Determine which tiles are worked based on manual assignment, 
-            // or default to automated if not assigned.
-            
+            // 4. Citizens work exactly the WorkedTiles list
             var workingTiles = new System.Collections.Generic.List<TileData>();
-            
-            // Try to use manually assigned tiles first
-            if (city.WorkedTiles.Count > 0)
+            foreach (var tilePos in city.WorkedTiles)
             {
-                foreach (var tilePos in city.WorkedTiles)
+                var t = Map.GetTile(tilePos.X, tilePos.Y);
+                if (t != null && t.OwnerCityId == city.Id)
                 {
-                    var t = Map.GetTile(tilePos.X, tilePos.Y);
-                    if (t != null && t.OwnerCityId == city.Id)
-                    {
-                        workingTiles.Add(t);
-                    }
-                }
-            }
-            
-            // If we don't have enough manual tiles, fill the rest with the best automatic ones
-            if (workingTiles.Count < city.Population)
-            {
-                // Find all potential tiles the city can work
-                var potentialTiles = new System.Collections.Generic.List<TileData>();
-                for (int dx = -radius; dx <= radius; dx++)
-                {
-                    for (int dy = -radius; dy <= radius; dy++)
-                    {
-                        if (dx == 0 && dy == 0) continue; // Center tile handled separately
-                        int tx = city.X + dx;
-                        int ty = city.Y + dy;
-                        if (Map.IsInBounds(tx, ty))
-                        {
-                            var tile = Map.GetTile(tx, ty);
-                            if (tile != null && tile.OwnerCityId == city.Id && !city.WorkedTiles.Contains((tx, ty)))
-                            {
-                                potentialTiles.Add(tile);
-                            }
-                        }
-                    }
-                }
-                
-                // Sort by total yield
-                potentialTiles.Sort((a, b) => 
-                    (b.TotalYield.Food + b.TotalYield.Production + b.TotalYield.Commerce)
-                    .CompareTo(a.TotalYield.Food + a.TotalYield.Production + a.TotalYield.Commerce)
-                );
-                
-                int needed = city.Population - workingTiles.Count;
-                for (int i = 0; i < Math.Min(needed, potentialTiles.Count); i++)
-                {
-                    workingTiles.Add(potentialTiles[i]);
+                    workingTiles.Add(t);
                 }
             }
 
@@ -2691,45 +3221,73 @@ public class GameSimulation
                 production *= 2;
             }
 
-            // Apply Corruption & Waste (based on government type and distance to capital)
+            // Apply Corruption & Waste (based on government type, distance to capital, and city rank)
             int dist = GetDistanceToNearestCapital(city);
             float corruptionRate;
             float wasteRate;
 
-            if (city.IsCapital)
+            if (city.IsCapital || city.Buildings.Any(b => b.Id == "forbidden_palace"))
             {
                 corruptionRate = 0f;
                 wasteRate = 0f;
             }
             else if (cityGov.Corruption == CorruptionLevel.Communal)
             {
-                // Communism: flat corruption everywhere regardless of distance
-                corruptionRate = 0.20f;
-                wasteRate = 0.15f;
+                // Communism: flat corruption everywhere regardless of distance, based on total number of cities
+                int totalCities = Cities.Count(c => c.Faction == city.Faction);
+                float communalRate = Math.Min(totalCities * 0.02f, 0.50f);
+                corruptionRate = communalRate;
+                wasteRate = communalRate;
             }
             else
             {
-                // Distance-based corruption scaled by government modifier
-                corruptionRate = Math.Min(dist * 0.10f * cityGov.CorruptionModifier, 0.80f);
-                wasteRate = Math.Min(dist * 0.08f * cityGov.CorruptionModifier, 0.60f);
+                // Distance Corruption
+                float distCorr = Math.Min(dist * 0.05f * cityGov.CorruptionModifier, 0.40f);
+                
+                // Rank Corruption (OCN)
+                int rank = factionRanks.GetValueOrDefault(city, 0);
+                float ocnModifier = cityGov.CorruptionModifier;
+                
+                // Commercial trait increases effective OCN by 25%
+                float effectiveOcn = optimalCityNumber;
+                if (city.HasTrait(CivTrait.Commercial)) effectiveOcn *= 1.25f;
+
+                float rankCorr = Math.Min((rank / effectiveOcn) * 0.40f * ocnModifier, 0.50f);
+
+                corruptionRate = Math.Min(distCorr + rankCorr, 0.90f);
+                wasteRate = Math.Min(distCorr + rankCorr, 0.90f);
             }
 
-            // Commercial Trait: 25% lower base corruption
-            if (city.HasTrait(CivTrait.Commercial))
-            {
-                corruptionRate *= 0.75f;
-                wasteRate *= 0.75f;
-            }
-
-            // Difficulty: Player corruption modifier (easier levels reduce corruption)
+            // Difficulty: Player corruption modifier
             if (city.Faction == Faction.Player)
             {
                 corruptionRate *= DifficultyConfig.PlayerCorruptionMultiplier;
                 wasteRate *= DifficultyConfig.PlayerCorruptionMultiplier;
             }
 
-            if (city.Buildings.Any(b => b.Id == "courthouse")) corruptionRate *= 0.5f;
-            if (city.Buildings.Any(b => b.Id == "police_station")) corruptionRate *= 0.5f;
+            if (city.Buildings.Any(b => b.Id == "courthouse")) { corruptionRate *= 0.6f; wasteRate *= 0.6f; }
+            if (city.Buildings.Any(b => b.Id == "police_station")) { corruptionRate *= 0.6f; wasteRate *= 0.6f; }
+
+            // WLTKD eliminates Rank Waste
+            if (city.IsWLTKD)
+            {
+                float distCorr = Math.Min(dist * 0.05f * cityGov.CorruptionModifier, 0.40f);
+                wasteRate = Math.Min(wasteRate, distCorr);
+            }
+
+            // Specialists (Taxmen and Scientists)
+            int cityTax = 0;
+            int cityScience = 0;
+            foreach (var spec in city.Specialists)
+            {
+                if (spec == SpecialistType.Taxman) cityTax += 2;
+                if (spec == SpecialistType.Scientist) cityScience += 3;
+            }
+            if (city.Faction == Faction.Player && !city.IsInDisorder)
+            {
+                totalSpecialistTaxThisTurn += cityTax;
+                totalSpecialistScienceThisTurn += cityScience;
+            }
 
             int corruption = (int)Math.Round(commerce * corruptionRate);
             int waste = (int)Math.Round(production * wasteRate);
@@ -2907,8 +3465,8 @@ public class GameSimulation
 
         // Apply national economy (only for player, AI doesn't track treasury yet)
         int netCommerce = totalCommerceThisTurn - totalMaintenanceThisTurn;
-        int scienceGain = 0;
-        int goldGain = 0;
+        int scienceGain = totalSpecialistScienceThisTurn;
+        int goldGain = totalSpecialistTaxThisTurn;
 
         if (netCommerce > 0)
         {
@@ -2927,8 +3485,7 @@ public class GameSimulation
         }
         else if (netCommerce < 0)
         {
-            goldGain = netCommerce; // Negative gold!
-            scienceGain = 0;
+            goldGain += netCommerce; // Negative gold!
         }
 
         // Unit Support Cost (Civ3 mechanic):
@@ -3167,6 +3724,7 @@ public class GameSimulation
             // Military Academy effect: if city has military_academy, military units start with +25% max health (125 HP instead of 100)
             if (city.Buildings.Any(b => b.Id == "military_academy") && unit.AttackStrength > 0)
             {
+                unit.Experience = ExperienceLevel.Elite;
                 unit.MaxHealth = 125;
                 unit.Health = 125;
                 System.Console.WriteLine($"[Military Academy] Trained elite {type} with +25% max health (125 HP)!");
@@ -3178,6 +3736,7 @@ public class GameSimulation
                                    Cities.Any(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "sun_tzu_war_academy"));
                 if (hasBarracks && unit.AttackStrength > 0 && unit.MaxHealth == 100)
                 {
+                    unit.Experience = ExperienceLevel.Veteran;
                     unit.MaxHealth = 120;
                     unit.Health = 120;
                     System.Console.WriteLine($"[Barracks] {unit.Type} enters service with Veteran status (120 HP)!");
@@ -3253,10 +3812,15 @@ public class GameSimulation
             PlayerTreasury -= goldCost;
         }
 
-        int oldHealth = unit.Health;
+        ExperienceLevel newExp = unit.Experience == ExperienceLevel.Elite ? ExperienceLevel.Veteran : unit.Experience;
+        if (newExp < ExperienceLevel.Veteran) newExp = ExperienceLevel.Veteran;
+        int newMaxHealth = newExp == ExperienceLevel.Veteran ? 120 : 100;
+
         var newUnit = new Unit(unit.Id, targetType, unit.X, unit.Y, unit.Faction, unit.CivilizationId)
         {
-            Health = oldHealth,
+            Experience = newExp,
+            MaxHealth = newMaxHealth,
+            Health = Math.Min(unit.Health, newMaxHealth),
             RemainingMovement = 0f,
             IsFortified = unit.IsFortified
         };
@@ -3267,27 +3831,176 @@ public class GameSimulation
         return true;
     }
 
-    // Helper to check if city has access to a strategic resource
+    // Helper to check if city has access to a strategic/luxury resource via Trade Network
     public bool CityHasResourceAccess(City city, string resourceId)
     {
-        int radius = city.VisionRange * 2;
-        for (int dx = -radius; dx <= radius; dx++)
+        if (CityTradeNetworks.TryGetValue(city.Id, out int networkId))
         {
-            for (int dy = -radius; dy <= radius; dy++)
+            if (TradeNetworkResources.TryGetValue(networkId, out var resources))
             {
-                int tx = city.X + dx;
-                int ty = city.Y + dy;
-                if (Map.IsInBounds(tx, ty))
+                return resources.Contains(resourceId);
+            }
+        }
+        return false;
+    }
+
+    private void CalculateTradeNetworks()
+    {
+        TradeNetworkResources.Clear();
+        CityTradeNetworks.Clear();
+        
+        int nextNetworkId = 1;
+        var visited = new HashSet<(int X, int Y)>();
+        
+        // Tiles that can form connections
+        bool IsConnectableTile(int x, int y, Faction faction)
+        {
+            var tile = Map.GetTile(x, y);
+            if (tile == null) return false;
+            // Roads/Railroads always connect
+            if (tile.HasRoad || tile.HasRailroad) return true;
+            // City centers implicitly have a road (even if destroyed later, cities are hubs)
+            if (Cities.Any(c => c.X == x && c.Y == y)) return true;
+            // Harbors connect over water, but we'll handle harbors in a separate pass or globally
+            return false;
+        }
+
+        for (int x = 0; x < Map.Width; x++)
+        {
+            for (int y = 0; y < Map.Height; y++)
+            {
+                if (visited.Contains((x, y))) continue;
+
+                var tile = Map.GetTile(x, y);
+                if (tile == null) continue;
+
+                // Start a BFS if we find a road/city that hasn't been visited
+                bool isCity = Cities.Any(c => c.X == x && c.Y == y);
+                if (tile.HasRoad || tile.HasRailroad || isCity)
                 {
-                    var tile = Map.GetTile(tx, ty);
-                    if (tile?.Resource?.Id == resourceId && tile.OwnerCityId == city.Id)
+                    int currentNetworkId = nextNetworkId++;
+                    var resourcesInNetwork = new HashSet<string>();
+                    var queue = new Queue<(int X, int Y)>();
+                    queue.Enqueue((x, y));
+                    visited.Add((x, y));
+                    
+                    int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
+                    int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+
+                    while (queue.Count > 0)
                     {
-                        return true;
+                        var (cx, cy) = queue.Dequeue();
+                        var currentTile = Map.GetTile(cx, cy);
+                        
+                        // Add city to this network
+                        var cityOnTile = Cities.FirstOrDefault(c => c.X == cx && c.Y == cy);
+                        if (cityOnTile != null)
+                        {
+                            CityTradeNetworks[cityOnTile.Id] = currentNetworkId;
+                        }
+
+                        // Collect resources on this tile (must have a road or be a city)
+                        // In Civ3, you must have a road on the resource (unless it's under city)
+                        // It must also be within cultural borders (OwnerCityId != null)
+                        bool hasRoadOrCity = currentTile.HasRoad || currentTile.HasRailroad || cityOnTile != null;
+                        if (hasRoadOrCity && currentTile.Resource != null && currentTile.OwnerCityId != null)
+                        {
+                            // Verify the owning city belongs to a faction (prevent exploiting enemy resources without war, etc.)
+                            // For simplicity, we just add the resource. Only cities in this network will see it anyway.
+                            resourcesInNetwork.Add(currentTile.Resource.Id);
+                        }
+
+                        // Traverse neighbors
+                        for (int i = 0; i < 8; i++)
+                        {
+                            int nx = cx + dx[i];
+                            int ny = cy + dy[i];
+                            if (Map.IsInBounds(nx, ny) && !visited.Contains((nx, ny)))
+                            {
+                                if (IsConnectableTile(nx, ny, Faction.Player))
+                                {
+                                    visited.Add((nx, ny));
+                                    queue.Enqueue((nx, ny));
+                                }
+                            }
+                        }
+                    }
+
+                    TradeNetworkResources[currentNetworkId] = resourcesInNetwork;
+                }
+            }
+        }
+
+        // Global pass: Merge networks for cities with Harbors or Airports (within the same faction)
+        foreach (Faction faction in Enum.GetValues<Faction>())
+        {
+            var factionCities = Cities.Where(c => c.Faction == faction).ToList();
+            
+            // Collect cities with harbors
+            var harborCities = factionCities.Where(c => c.Buildings.Any(b => b.Id == "harbor")).ToList();
+            if (harborCities.Count > 1)
+            {
+                // Find the lowest Network ID among these cities
+                var networkIds = harborCities
+                    .Where(c => CityTradeNetworks.ContainsKey(c.Id))
+                    .Select(c => CityTradeNetworks[c.Id])
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToList();
+
+                if (networkIds.Count > 1)
+                {
+                    int primaryNetwork = networkIds.First();
+                    for (int i = 1; i < networkIds.Count; i++)
+                    {
+                        int fromNetwork = networkIds[i];
+                        // Move resources to primary
+                        if (TradeNetworkResources.TryGetValue(fromNetwork, out var fromRes))
+                        {
+                            foreach (var r in fromRes) TradeNetworkResources[primaryNetwork].Add(r);
+                            TradeNetworkResources.Remove(fromNetwork);
+                        }
+                        // Remap cities
+                        foreach (var kvp in CityTradeNetworks.ToList())
+                        {
+                            if (kvp.Value == fromNetwork)
+                                CityTradeNetworks[kvp.Key] = primaryNetwork;
+                        }
+                    }
+                }
+            }
+            
+            // Similarly for Airports
+            var airportCities = factionCities.Where(c => c.Buildings.Any(b => b.Id == "airport")).ToList();
+            if (airportCities.Count > 1)
+            {
+                var networkIds = airportCities
+                    .Where(c => CityTradeNetworks.ContainsKey(c.Id))
+                    .Select(c => CityTradeNetworks[c.Id])
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToList();
+
+                if (networkIds.Count > 1)
+                {
+                    int primaryNetwork = networkIds.First();
+                    for (int i = 1; i < networkIds.Count; i++)
+                    {
+                        int fromNetwork = networkIds[i];
+                        if (TradeNetworkResources.TryGetValue(fromNetwork, out var fromRes))
+                        {
+                            foreach (var r in fromRes) TradeNetworkResources[primaryNetwork].Add(r);
+                            TradeNetworkResources.Remove(fromNetwork);
+                        }
+                        foreach (var kvp in CityTradeNetworks.ToList())
+                        {
+                            if (kvp.Value == fromNetwork)
+                                CityTradeNetworks[kvp.Key] = primaryNetwork;
+                        }
                     }
                 }
             }
         }
-        return false;
     }
 
     public void CycleCityProduction(City city)
@@ -3447,5 +4160,227 @@ public class GameSimulation
         }
 
         return ProductionProject.None;
+    }
+
+    // ══════════════════════════════════════════════════
+    // AIR COMBAT (CIV3)
+    // ══════════════════════════════════════════════════
+
+    public bool SetAirMission(Unit unit, AirMission mission)
+    {
+        if (unit.Domain != UnitDomain.Air) return false;
+        
+        // Ensure unit is in a valid base
+        bool inCity = Cities.Any(c => c.X == unit.X && c.Y == unit.Y && c.Faction == unit.Faction);
+        bool onCarrier = Units.Any(u => u.X == unit.X && u.Y == unit.Y && u.Type == UnitType.Carrier && u.Faction == unit.Faction);
+        
+        if (!inCity && !onCarrier) return false;
+
+        unit.CurrentAirMission = mission;
+        
+        // If AirSuperiority, it just waits for interception
+        if (mission == AirMission.AirSuperiority)
+        {
+            Console.WriteLine($"[Air Force] {unit.Type} at ({unit.X},{unit.Y}) is on Air Superiority patrol.");
+            unit.RemainingMovement = 0; // Mission takes its turn
+        }
+        
+        return true;
+    }
+
+    public bool RebaseAirUnit(Unit unit, int targetX, int targetY)
+    {
+        if (unit.Domain != UnitDomain.Air || unit.RemainingMovement <= 0) return false;
+        
+        // Rebase range in Civ3 is usually 4x Operational Range
+        int maxRebaseRange = unit.OperationalRange * 4;
+        int distance = Math.Max(Math.Abs(unit.X - targetX), Math.Abs(unit.Y - targetY));
+        if (distance > maxRebaseRange) return false;
+
+        // Verify target is valid base
+        bool isCity = Cities.Any(c => c.X == targetX && c.Y == targetY && c.Faction == unit.Faction);
+        bool isCarrier = Units.Any(u => u.X == targetX && u.Y == targetY && u.Type == UnitType.Carrier && u.Faction == unit.Faction);
+        
+        if (!isCity && !isCarrier) return false;
+
+        // Move unit
+        unit.X = targetX;
+        unit.Y = targetY;
+        unit.RemainingMovement = 0;
+        unit.CurrentAirMission = AirMission.None;
+        
+        Console.WriteLine($"[Air Force] {unit.Type} rebased to ({targetX},{targetY}).");
+        return true;
+    }
+
+    public void ExecuteAirBombard(Unit bomber, int targetX, int targetY)
+    {
+        if (bomber.Domain != UnitDomain.Air || bomber.RemainingMovement <= 0) return;
+        
+        int distance = Math.Max(Math.Abs(bomber.X - targetX), Math.Abs(bomber.Y - targetY));
+        if (distance > bomber.OperationalRange) return;
+
+        bomber.RemainingMovement = 0;
+        bomber.CurrentAirMission = AirMission.Bombard;
+
+        Console.WriteLine($"[Air Force] {bomber.Type} from ({bomber.X},{bomber.Y}) attempting bombard on ({targetX},{targetY}).");
+
+        // 1. Interception Check
+        if (CheckAirInterception(bomber, targetX, targetY))
+        {
+            // Interception occurred! The bomber was either shot down or aborted.
+            // Check if bomber still exists
+            if (!Units.Contains(bomber))
+            {
+                return; // Shot down
+            }
+            
+            // Civ3: if intercepted but survives, it often still aborts the bombing run.
+            Console.WriteLine($"[Air Force] {bomber.Type} survived interception but aborted the mission.");
+            return;
+        }
+
+        // 2. Perform Bombardment (Same logic as artillery, but air uses BombardStrength)
+        var targetTile = Map.GetTile(targetX, targetY);
+        if (targetTile == null) return;
+
+        var defUnit = Units.Where(u => u.X == targetX && u.Y == targetY && u.Faction != bomber.Faction)
+                           .OrderByDescending(u => u.DefenseStrength)
+                           .FirstOrDefault();
+                           
+        var targetCity = Cities.FirstOrDefault(c => c.X == targetX && c.Y == targetY && c.Faction != bomber.Faction);
+
+        Random rng = new Random();
+        int roll = rng.Next(1, 101); // simplistic bombard chance
+
+        if (defUnit != null)
+        {
+            // Bombard unit
+            if (roll > 50) // Simplified: 50% hit chance
+            {
+                defUnit.Health -= 20; // 1 HP in Civ3 is usually 20 in our system
+                Console.WriteLine($"[Air Force] Bombard hit! {defUnit.Type} damaged. Health: {defUnit.Health}/{defUnit.MaxHealth}");
+                if (defUnit.Health <= 0)
+                {
+                    Units.Remove(defUnit);
+                    Console.WriteLine($"[Air Force] {defUnit.Type} was completely destroyed by bombardment!");
+                }
+            }
+            else
+            {
+                Console.WriteLine("[Air Force] Bombard missed the unit.");
+            }
+        }
+        else if (targetCity != null)
+        {
+            // Bombard city (kill pop or destroy improvement)
+            if (roll > 70 && targetCity.Population > 1)
+            {
+                targetCity.Population--;
+                Console.WriteLine($"[Air Force] Bombard hit city! {targetCity.Name} population reduced to {targetCity.Population}.");
+            }
+            else
+            {
+                Console.WriteLine($"[Air Force] Bombard hit city but caused minimal damage.");
+            }
+        }
+        else if (targetTile.HasRoad || targetTile.HasRailroad || targetTile.Improvement != null)
+        {
+            // Bombard improvement
+            if (roll > 40)
+            {
+                targetTile.Improvement = null;
+                targetTile.HasRoad = false;
+                targetTile.HasRailroad = false;
+                Console.WriteLine($"[Air Force] Bombard destroyed terrain improvements at ({targetX},{targetY}).");
+            }
+            else
+            {
+                Console.WriteLine($"[Air Force] Bombard missed terrain improvements.");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"[Air Force] Bombard fell on empty land.");
+        }
+    }
+
+    private bool CheckAirInterception(Unit bomber, int targetX, int targetY)
+    {
+        // Find enemy fighters on Air Superiority mission whose operational range covers the target tile
+        var interceptor = Units.FirstOrDefault(u => 
+            u.Domain == UnitDomain.Air && 
+            u.Faction != bomber.Faction &&
+            u.CurrentAirMission == AirMission.AirSuperiority &&
+            Math.Max(Math.Abs(u.X - targetX), Math.Abs(u.Y - targetY)) <= u.OperationalRange);
+
+        if (interceptor != null)
+        {
+            Console.WriteLine($"[Air Combat] {interceptor.Type} intercepts {bomber.Type} over ({targetX},{targetY})!");
+            
+            // Simple air-to-air combat: Interceptor Attack vs Bomber Defense
+            // (Assuming standard Civ3 combat logic translated to our system)
+            int interceptorStr = interceptor.AttackStrength;
+            int bomberStr = bomber.DefenseStrength;
+            if (interceptorStr == 0) interceptorStr = 1;
+            if (bomberStr == 0) bomberStr = 1;
+            
+            float interceptorChance = (float)interceptorStr / (interceptorStr + bomberStr);
+            Random rng = new Random();
+            
+            if (rng.NextDouble() < interceptorChance)
+            {
+                // Bomber takes damage or dies
+                bomber.Health -= 50; // Heavy damage
+                if (bomber.Health <= 0)
+                {
+                    Units.Remove(bomber);
+                    Console.WriteLine($"[Air Combat] {bomber.Type} was shot down by {interceptor.Type}!");
+                }
+                else
+                {
+                    Console.WriteLine($"[Air Combat] {bomber.Type} was heavily damaged but survived.");
+                }
+            }
+            else
+            {
+                // Interceptor takes damage or dies
+                interceptor.Health -= 50;
+                if (interceptor.Health <= 0)
+                {
+                    Units.Remove(interceptor);
+                    Console.WriteLine($"[Air Combat] {interceptor.Type} was shot down by the bomber's defense guns!");
+                }
+                else
+                {
+                    Console.WriteLine($"[Air Combat] {interceptor.Type} was repelled by the bomber.");
+                }
+            }
+            return true; // interception occurred
+        }
+
+        // Also check ground Anti-Air (Flak, SAM, Aegis Cruiser, etc.)
+        var groundAA = Units.FirstOrDefault(u => 
+            u.Faction != bomber.Faction &&
+            u.X == targetX && u.Y == targetY &&
+            (u.Type == UnitType.AegisCruiser || u.Type == UnitType.Destroyer || u.Type == UnitType.Cruiser || u.Type == UnitType.Battleship));
+            
+        if (groundAA != null)
+        {
+            Console.WriteLine($"[Air Combat] Ground Anti-Air fire from {groundAA.Type} at ({targetX},{targetY})!");
+            Random rng = new Random();
+            if (rng.Next(1, 100) < 30) // 30% chance to hit
+            {
+                bomber.Health -= 40;
+                if (bomber.Health <= 0)
+                {
+                    Units.Remove(bomber);
+                    Console.WriteLine($"[Air Combat] {bomber.Type} was shot down by AA fire!");
+                }
+                return true; // Aborted due to heavy AA fire
+            }
+        }
+
+        return false;
     }
 }

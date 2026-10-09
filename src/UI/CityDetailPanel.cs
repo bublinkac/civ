@@ -82,7 +82,10 @@ public partial class CityDetailPanel : PanelContainer
         middleVBox.AddChild(mapComp);
 
         // Citizens Row (Beneath the Map)
-        var citizensComp = new CityCitizensComponent(_city, _sim);
+        var citizensComp = new CityCitizensComponent(_city, _sim, () => {
+            _city.UpdateCitizenMood(_sim);
+            CreateLayout();
+        });
         middleVBox.AddChild(citizensComp);
 
         // Divider

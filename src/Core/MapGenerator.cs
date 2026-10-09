@@ -59,7 +59,108 @@ public class MapGenerator
             }
         }
 
+        // Second pass: Generate Rivers
+        GenerateRivers(map, resolved);
+
         return map;
+    }
+
+    private void GenerateRivers(GameMap map, GameSetupOptions options)
+    {
+        var rand = new Random(_seed ^ 0x12345);
+        int targetRivers = (map.Width * map.Height) / 75; // Roughly 1 river per 75 tiles
+
+        var highPoints = new List<TileData>();
+        for (int x = 0; x < map.Width; x++)
+        {
+            for (int y = 0; y < map.Height; y++)
+            {
+                var tile = map.GetTile(x, y);
+                if (tile != null && (tile.Terrain.Id == "mountain" || tile.Terrain.Id == "hills" || tile.Terrain.Id == "volcano"))
+                {
+                    highPoints.Add(tile);
+                }
+            }
+        }
+
+        // Shuffle highPoints
+        int n = highPoints.Count;
+        while (n > 1)
+        {
+            n--;
+            int k = rand.Next(n + 1);
+            var value = highPoints[k];
+            highPoints[k] = highPoints[n];
+            highPoints[n] = value;
+        }
+
+        int riversGenerated = 0;
+        foreach (var startTile in highPoints)
+        {
+            if (riversGenerated >= targetRivers) break;
+            if (startTile.HasRiver) continue;
+
+            TileData current = startTile;
+            int length = 0;
+            var path = new List<TileData>();
+            
+            while (true)
+            {
+                path.Add(current);
+                
+                if (current.Terrain.Id == "coast" || current.Terrain.Id == "sea" || current.Terrain.Id == "ocean")
+                {
+                    break; 
+                }
+
+                if (length > 25) break;
+
+                var neighbors = new List<TileData>();
+                for(int dx=-1; dx<=1; dx++) {
+                    for(int dy=-1; dy<=1; dy++) {
+                        if(dx==0 && dy==0) continue;
+                        var nxt = map.GetTile(current.X + dx, current.Y + dy);
+                        if(nxt != null && !path.Contains(nxt)) {
+                            neighbors.Add(nxt);
+                        }
+                    }
+                }
+
+                if (neighbors.Count == 0) break; // Trapped
+
+                int GetElevationScore(string t) => t switch {
+                    "volcano" => 4,
+                    "mountain" => 3,
+                    "hills" => 2,
+                    "coast" => 0, "sea" => 0, "ocean" => 0,
+                    _ => 1
+                };
+
+                int currScore = GetElevationScore(current.Terrain.Id);
+                var validMoves = new List<TileData>();
+                foreach(var nxt in neighbors) {
+                    if (GetElevationScore(nxt.Terrain.Id) <= currScore)
+                    {
+                        validMoves.Add(nxt);
+                    }
+                }
+
+                if (validMoves.Count == 0) break;
+
+                current = validMoves[rand.Next(validMoves.Count)];
+                length++;
+            }
+
+            if (length > 3)
+            {
+                foreach(var t in path) {
+                    if (t.IsLand) {
+                        t.HasRiver = true;
+                    }
+                }
+                riversGenerated++;
+            }
+        }
     }
 
     private static TerrainType DetermineTerrain(double elevation, double moisture, double latitude, GameSetupOptions options)

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Godot;
 using CivGame.Core;
+using CivGame.Audio;
 
 namespace CivGame.UI;
 
@@ -266,12 +267,17 @@ public partial class MainMenu : CanvasLayer
             // Connect pressed signal
             if (action != null)
             {
-                btn.Pressed += action;
+                btn.Pressed += () => 
+                {
+                    AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/click.wav");
+                    action();
+                };
             }
 
             // Interactive bullet light-up on hover
             btn.MouseEntered += () =>
             {
+                AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/hover.wav");
                 bullet.AddThemeStyleboxOverride("panel", CreateCirclePanelStyle(
                     new Color(0.92f, 0.75f, 0.3f), Colors.White, 2));
             };

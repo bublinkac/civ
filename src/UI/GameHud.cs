@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Godot;
 using CivGame.Core;
+using CivGame.Audio;
 
 namespace CivGame.UI;
 
@@ -94,6 +95,18 @@ public partial class GameHud : CanvasLayer
         var histoBtn = CreateStyledButton("📊 Histograph", new Color(0.2f, 0.25f, 0.35f));
         histoBtn.Pressed += () => OnActionTriggered?.Invoke("open_histograph");
         hbox.AddChild(histoBtn);
+
+        var wondersBtn = CreateStyledButton("🏛️ Wonders", new Color(0.35f, 0.28f, 0.15f));
+        wondersBtn.Pressed += () => OnActionTriggered?.Invoke("open_wonders");
+        hbox.AddChild(wondersBtn);
+
+        var demoBtn = CreateStyledButton("📈 Demographics", new Color(0.2f, 0.3f, 0.2f));
+        demoBtn.Pressed += () => OnActionTriggered?.Invoke("open_demographics");
+        hbox.AddChild(demoBtn);
+
+        var espBtn = CreateStyledButton("🕵️ Espionage", new Color(0.15f, 0.15f, 0.25f));
+        espBtn.Pressed += () => OnActionTriggered?.Invoke("open_espionage");
+        hbox.AddChild(espBtn);
 
         _topBar.AddChild(hbox);
         AddChild(_topBar);
@@ -191,7 +204,11 @@ public partial class GameHud : CanvasLayer
         _endTurnButton = CreateStyledButton("END TURN", new Color(0.12f, 0.55f, 0.22f), new Color(0.95f, 0.72f, 0.12f));
         _endTurnButton.CustomMinimumSize = new Vector2(140, 55);
         _endTurnButton.AddThemeFontSizeOverride("font_size", 16);
-        _endTurnButton.Pressed += () => OnActionTriggered?.Invoke("end_turn");
+        _endTurnButton.Pressed += () => 
+        {
+            AudioManager.Instance?.PlaySfx("res://assets/audio/sfx/end_turn.wav");
+            OnActionTriggered?.Invoke("end_turn");
+        };
         turnBox.AddChild(_endTurnButton);
 
         detailsHBox.AddChild(turnBox);
@@ -343,7 +360,7 @@ public partial class GameHud : CanvasLayer
         saveBtn.Pressed += () => {
             _gameMenuModal.Visible = false;
             OnActionTriggered?.Invoke("save_game");
-            ShowInfoPopup("SAVE COMPLETE", "Your game state has been saved successfully to Slot 1.");
+            ShowNotification("SAVE COMPLETE", "Your game state has been saved successfully to Slot 1.");
         };
         vboxMenu.AddChild(saveBtn);
 
@@ -363,7 +380,7 @@ public partial class GameHud : CanvasLayer
             debugBtn.Text = GameSimulation.DebugIgnorePrerequisites
                 ? "🔧 DEBUG: Prerequisites IGNORED (ON)"
                 : "🔧 DEBUG: Ignore Prerequisites (OFF)";
-            ShowInfoPopup("DEBUG MODE", GameSimulation.DebugIgnorePrerequisites
+            ShowNotification("DEBUG MODE", GameSimulation.DebugIgnorePrerequisites
                 ? "All building/wonder prerequisites are now IGNORED. You can build anything!"
                 : "All building/wonder prerequisites are now ENFORCED normally.");
         };
@@ -537,7 +554,7 @@ public partial class GameHud : CanvasLayer
         if (_gameMenuModal != null) _gameMenuModal.Visible = false;
     }
 
-    private void ShowInfoPopup(string title, string message)
+    public void ShowNotification(string title, string message)
     {
         if (_confirmModal == null || _confirmTitleLabel == null || _confirmMessageLabel == null || _confirmYesButton == null || _confirmNoButton == null) return;
 
@@ -546,7 +563,7 @@ public partial class GameHud : CanvasLayer
         _confirmYesButton.Text = "OK";
         _confirmNoButton.Visible = false;
         _pendingConfirmAction = () => {
-            if (_gameMenuModal != null) _gameMenuModal.Visible = true;
+            // Note: we can clear this if needed
         };
 
         _confirmModal.Visible = true;
@@ -699,7 +716,8 @@ public partial class GameHud : CanvasLayer
                 {
                     string impName = tile.Improvement != null ? $" ({tile.Improvement.Name})" : "";
                     string roadName = tile.HasRailroad ? " [RAILROAD]" : (tile.HasRoad ? " [ROAD]" : "");
-                    details += $"\nTerrain: {tile.Terrain.ToString().ToUpper()}{impName.ToUpper()}{roadName} | Yields: {tile.TotalYield}";
+                    string riverName = tile.HasRiver ? " [RIVER]" : "";
+                    details += $"\nTerrain: {tile.Terrain.ToString().ToUpper()}{impName.ToUpper()}{roadName}{riverName} | Yields: {tile.TotalYield}";
                 }
 
                 _detailsLabel.Text = details;
@@ -768,6 +786,38 @@ public partial class GameHud : CanvasLayer
                                             var rrBtn = CreateActionButton("🚂", "Build Railroad", "R", () => OnActionTriggered?.Invoke("railroad"), new Color(0.35f, 0.15f, 0.15f));
                                             _actionsBox.AddChild(rrBtn);
                                         }
+                                        if (new ClearForest().CanBeBuiltOn(tile.Terrain)) {
+                                            var btn = CreateActionButton("🪓", "Clear Forest", "C", () => OnActionTriggered?.Invoke("clear_forest"), new Color(0.2f, 0.4f, 0.2f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new ClearJungle().CanBeBuiltOn(tile.Terrain)) {
+                                            var btn = CreateActionButton("🪓", "Clear Jungle", "C", () => OnActionTriggered?.Invoke("clear_jungle"), new Color(0.1f, 0.3f, 0.1f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new ClearMarsh().CanBeBuiltOn(tile.Terrain)) {
+                                            var btn = CreateActionButton("🪓", "Clear Marsh", "C", () => OnActionTriggered?.Invoke("clear_marsh"), new Color(0.2f, 0.3f, 0.2f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new PlantForest().CanBeBuiltOn(tile.Terrain) && sim.Research.IsResearched("engineering")) {
+                                            var btn = CreateActionButton("🌲", "Plant Forest", "P", () => OnActionTriggered?.Invoke("plant_forest"), new Color(0.1f, 0.4f, 0.1f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new AirfieldImprovement().CanBeBuiltOn(tile.Terrain) && sim.Research.IsResearched("flight")) {
+                                            var btn = CreateActionButton("✈️", "Airfield", "A", () => OnActionTriggered?.Invoke("airfield"), new Color(0.4f, 0.4f, 0.5f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new RadarTowerImprovement().CanBeBuiltOn(tile.Terrain) && sim.Research.IsResearched("radio")) {
+                                            var btn = CreateActionButton("📡", "Radar Tower", "D", () => OnActionTriggered?.Invoke("radar_tower"), new Color(0.3f, 0.3f, 0.6f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new Fortress().CanBeBuiltOn(tile.Terrain)) {
+                                            var btn = CreateActionButton("🏰", "Fortress", "F", () => OnActionTriggered?.Invoke("fortress"), new Color(0.4f, 0.3f, 0.2f));
+                                            _actionsBox.AddChild(btn);
+                                        }
+                                        if (new Barricade().CanBeBuiltOn(tile.Terrain) && tile.Improvement?.Id == "fortress") {
+                                            var btn = CreateActionButton("🚧", "Barricade", "B", () => OnActionTriggered?.Invoke("barricade"), new Color(0.5f, 0.3f, 0.1f));
+                                            _actionsBox.AddChild(btn);
+                                        }
                                     }
                                 }
                             }
@@ -779,13 +829,15 @@ public partial class GameHud : CanvasLayer
                                 _actionsBox.AddChild(disembarkBtn);
                             }
 
-                            // Land unit Board Transport
+                            // Land unit Board Transport (Sea or Army)
                             if (unit.Domain == UnitDomain.Land && unit.HasMovementRemaining())
                             {
-                                var adjTransport = sim.Units.Find(u => u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit) && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 1);
+                                var adjTransport = sim.Units.Find(u => u.Faction == unit.Faction && u.CanBoardTransport(unit) && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 1);
                                 if (adjTransport != null)
                                 {
-                                    var boardBtn = CreateActionButton("🚢", "Board Ship", "L", () => OnActionTriggered?.Invoke("board"), new Color(0.12f, 0.35f, 0.45f));
+                                    string verb = adjTransport.Type == UnitType.Army ? "Join Army" : "Board Ship";
+                                    string icon = adjTransport.Type == UnitType.Army ? "🎖️" : "🚢";
+                                    var boardBtn = CreateActionButton(icon, verb, "L", () => OnActionTriggered?.Invoke("board"), new Color(0.12f, 0.35f, 0.45f));
                                     _actionsBox.AddChild(boardBtn);
                                 }
                             }
@@ -810,12 +862,53 @@ public partial class GameHud : CanvasLayer
                                 _actionsBox.AddChild(rebaseBtn);
                             }
 
-                            // Standard actions for all awake units (Fortify & Sleep)
+                            // Great Leader Actions
+                            if (unit.Type == UnitType.GreatLeader && unit.HasMovementRemaining())
+                            {
+                                var buildArmyBtn = CreateActionButton("🛡️", "Create Army", "C", () => OnActionTriggered?.Invoke("create_army"), new Color(0.8f, 0.6f, 0.1f));
+                                _actionsBox.AddChild(buildArmyBtn);
+
+                                var city = sim.Cities.Find(c => c.X == unit.X && c.Y == unit.Y && c.Faction == unit.Faction);
+                                if (city != null)
+                                {
+                                    var hurryBtn = CreateActionButton("⚡", "Hurry Production", "H", () => OnActionTriggered?.Invoke("hurry_production"), new Color(0.2f, 0.7f, 0.2f));
+                                    _actionsBox.AddChild(hurryBtn);
+                                }
+                            }
+
+                            // Standard actions for all awake units
                             var fortifyBtn = CreateActionButton("🛡️", "Fortify", "F", () => OnActionTriggered?.Invoke("fortify"), new Color(0.3f, 0.15f, 0.15f));
                             _actionsBox.AddChild(fortifyBtn);
 
                             var sleepBtn = CreateActionButton("💤", "Sleep", "S", () => OnActionTriggered?.Invoke("sleep"), new Color(0.2f, 0.12f, 0.25f));
                             _actionsBox.AddChild(sleepBtn);
+
+                            var sentryBtn = CreateActionButton("👁️", "Sentry", "Y", () => OnActionTriggered?.Invoke("sentry"), new Color(0.15f, 0.25f, 0.15f));
+                            _actionsBox.AddChild(sentryBtn);
+
+                            if (unit.IsLandUnit && unit.AttackStrength > 0)
+                            {
+                                var pillageBtn = CreateActionButton("🔥", "Pillage", "P", () => OnActionTriggered?.Invoke("pillage"), new Color(0.4f, 0.1f, 0.1f));
+                                _actionsBox.AddChild(pillageBtn);
+                            }
+
+                            var def = Core.UnitDefinitionRegistry.Get(unit.Type);
+                            if (def.UpgradesTo != null)
+                            {
+                                var upgradeBtn = CreateActionButton("⬆️", "Upgrade", "U", () => OnActionTriggered?.Invoke("upgrade"), new Color(0.1f, 0.4f, 0.5f));
+                                _actionsBox.AddChild(upgradeBtn);
+                            }
+
+                            if (unit.Type == UnitType.Worker)
+                            {
+                                var autoWorkerBtn = CreateActionButton("⚙️", "Automate", "A", () => OnActionTriggered?.Invoke("automate"), new Color(0.2f, 0.2f, 0.2f));
+                                _actionsBox.AddChild(autoWorkerBtn);
+                            }
+                            else if (unit.Type == UnitType.Explorer || unit.IsNavalUnit)
+                            {
+                                var autoExploreBtn = CreateActionButton("🗺️", "Explore", "E", () => OnActionTriggered?.Invoke("explore"), new Color(0.2f, 0.2f, 0.4f));
+                                _actionsBox.AddChild(autoExploreBtn);
+                            }
                         }
                     }
                 }
@@ -840,10 +933,17 @@ public partial class GameHud : CanvasLayer
                     ? string.Join(", ", city.Buildings.Select(b => b.Name.ToUpper())) 
                     : "NONE";
 
-                _detailsLabel.Text = $"[CITY] {city.Name.ToUpper()}{factionStr} (Population: {city.Population})\n" +
-                                     $"Food: {city.StoredFood}/{city.FoodNeededForGrowth} ({foodTrend}) | Stored Prod: {city.StoredProduction} | Commerce: {city.StoredCommerce}\n" +
+                string wltkdStr = city.IsWLTKD ? " [WLTKD! 🎉]" : "";
+                string disorderStr = city.IsInDisorder ? " [🚨 DISORDER!]" : "";
+                string popStr = $"Pop: {city.Population} ({city.HappyCitizens}😊/{city.ContentCitizens}😐/{city.UnhappyCitizens}😠){wltkdStr}{disorderStr}";
+                
+                string wasteStr = city.LastTurnWaste > 0 ? $" (Waste: -{city.LastTurnWaste})" : "";
+                string corrStr = city.LastTurnCorruption > 0 ? $" (Corr: -{city.LastTurnCorruption})" : "";
+
+                _detailsLabel.Text = $"[CITY] {city.Name.ToUpper()}{factionStr} | {popStr}\n" +
+                                     $"Food: {city.StoredFood}/{city.FoodNeededForGrowth} ({foodTrend}) | Prod: {city.StoredProduction}{wasteStr} | Commerce: {city.StoredCommerce}{corrStr}\n" +
                                      $"Active Queue: {projectInfo}\n" +
-                                     $"Completed Structures: {buildingsList}";
+                                     $"Buildings: {buildingsList}";
 
                 // Populate action button for player city
                 if (city.Faction == Faction.Player && _actionsBox != null)

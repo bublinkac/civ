@@ -47,33 +47,53 @@ public partial class CityEconomyModuleComponent : PanelContainer
         luxGrid.AddThemeConstantOverride("v_separation", 2);
         luxVBox.AddChild(luxGrid);
 
-        // List of luxuries connected
-        var luxuries = new (string name, string icon, string effect)[]
+        var connectedLuxs = sim.GetCityConnectedLuxuries(city);
+        bool hasMarketplace = city.Buildings.Any(b => b.Id == "marketplace");
+
+        // Dictionary to map standard lux IDs to icons
+        var luxIcons = new System.Collections.Generic.Dictionary<string, string>
         {
-            ("Wine", "🍷", "😊"),
-            ("Gems", "💎", "😊😊"),
-            ("Fur", "🧥", "😊"),
-            ("Spices", "🧂", "😊"),
+            { "wine", "🍷" }, { "dyes", "🎨" }, { "furs", "🧥" },
+            { "spices", "🧂" }, { "ivory", "🐘" }, { "silks", "👘" },
+            { "incense", "🕯️" }, { "gems", "💎" }
         };
 
-        foreach (var lux in luxuries)
+        if (connectedLuxs.Count == 0)
         {
-            // Assume player always has some luxuries connected or based on courthouse/market
-            bool hasLux = city.Buildings.Any(b => b.Id == "marketplace") || city.Population > 2;
+            var noneLabel = new Label { Text = "No luxuries connected to Trade Network." };
+            noneLabel.AddThemeFontSizeOverride("font_size", 10);
+            noneLabel.AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.5f));
+            luxVBox.AddChild(noneLabel);
+        }
+        else
+        {
+            int luxIndex = 1;
+            foreach (var luxId in connectedLuxs)
+            {
+                var luxDef = ResourceRegistry.Get(luxId);
+                if (luxDef == null) continue;
 
-            var iconLabel = new Label { Text = lux.icon };
-            iconLabel.AddThemeFontSizeOverride("font_size", 14);
-            if (!hasLux) iconLabel.Modulate = new Color(1, 1, 1, 0.25f);
-            luxGrid.AddChild(iconLabel);
+                string icon = luxIcons.ContainsKey(luxId) ? luxIcons[luxId] : "📦";
+                
+                // Calculate happy effect based on marketplace
+                int happyFaces = hasMarketplace ? ((luxIndex + 1) / 2) : 1;
+                string effectStr = string.Concat(System.Linq.Enumerable.Repeat("😊", happyFaces));
 
-            var nameLabel = new Label { Text = lux.name };
-            nameLabel.AddThemeFontSizeOverride("font_size", 10);
-            nameLabel.AddThemeColorOverride("font_color", hasAccessColor(hasLux));
-            luxGrid.AddChild(nameLabel);
+                var iconLabel = new Label { Text = icon };
+                iconLabel.AddThemeFontSizeOverride("font_size", 14);
+                luxGrid.AddChild(iconLabel);
 
-            var effLabel = new Label { Text = hasLux ? lux.effect : "" };
-            effLabel.AddThemeFontSizeOverride("font_size", 10);
-            luxGrid.AddChild(effLabel);
+                var nameLabel = new Label { Text = luxDef.Name };
+                nameLabel.AddThemeFontSizeOverride("font_size", 10);
+                nameLabel.AddThemeColorOverride("font_color", hasAccessColor(true));
+                luxGrid.AddChild(nameLabel);
+
+                var effLabel = new Label { Text = effectStr };
+                effLabel.AddThemeFontSizeOverride("font_size", 10);
+                luxGrid.AddChild(effLabel);
+
+                luxIndex++;
+            }
         }
 
         vbox.AddChild(new HSeparator());

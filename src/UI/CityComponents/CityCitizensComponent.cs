@@ -7,7 +7,7 @@ namespace CivGame.UI.CityComponents;
 
 public partial class CityCitizensComponent : PanelContainer
 {
-    public CityCitizensComponent(City city, GameSimulation sim)
+    public CityCitizensComponent(City city, GameSimulation sim, Action onCitizensChanged)
     {
         // Transparent style, just displays citizen rows
         var style = new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0) };
@@ -26,21 +26,8 @@ public partial class CityCitizensComponent : PanelContainer
         int happyCount = city.HappyCitizens;
         int contentCount = city.ContentCitizens;
         int unhappyCount = city.UnhappyCitizens;
-        int scientists = 0;
-
-        // Turn some into scientists if we have educational buildings and large population
-        int totalPop = city.Population;
-        if (city.Buildings.Any(b => b.Id == "library" || b.Id == "university") && totalPop > 4)
-        {
-            scientists = Math.Min(2, totalPop - 4);
-            // Deduct specialists from working citizens, favoring unhappy/content deduction first
-            for (int i = 0; i < scientists; i++)
-            {
-                if (unhappyCount > 0) unhappyCount--;
-                else if (contentCount > 0) contentCount--;
-                else if (happyCount > 0) happyCount--;
-            }
-        }
+        // We no longer deduct fake scientists here.
+        // The real Specialists are stored in city.Specialists.
 
         // Draw Happy Citizens (👑😊)
         for (int i = 0; i < happyCount; i++)
@@ -60,23 +47,46 @@ public partial class CityCitizensComponent : PanelContainer
             hbox.AddChild(createCitizenHead("😡🧑", "Unhappy Citizen (Requires Luxuries or Temples)", new Color(0.85f, 0.15f, 0.15f)));
         }
 
-        // Draw Scientists (🧑‍🔬)
-        for (int i = 0; i < scientists; i++)
+        // Draw Real Specialists
+        for (int i = 0; i < city.Specialists.Count; i++)
         {
-            hbox.AddChild(createCitizenHead("🧑‍🔬", "Specialist: Scientist (+3 Science)", new Color(0.1f, 0.75f, 0.75f)));
+            int specIndex = i; // capture for closure
+            var spec = city.Specialists[i];
+            string icon = spec == SpecialistType.Entertainer ? "🤹" : (spec == SpecialistType.Taxman ? "💰" : "🧑‍🔬");
+            string tt = spec == SpecialistType.Entertainer ? "Entertainer (+1 Happy)" : (spec == SpecialistType.Taxman ? "Tax Collector (+2 Gold)" : "Scientist (+3 Science)");
+            Color col = spec == SpecialistType.Entertainer ? new Color(0.8f, 0.4f, 0.8f) : (spec == SpecialistType.Taxman ? new Color(0.8f, 0.7f, 0.2f) : new Color(0.1f, 0.75f, 0.75f));
+            
+            hbox.AddChild(createCitizenHead(icon, "Specialist: " + tt + " (Click to change)", col, () => {
+                // Cycle: Entertainer -> Taxman -> Scientist -> Entertainer
+                if (city.Specialists[specIndex] == SpecialistType.Entertainer) city.Specialists[specIndex] = SpecialistType.Taxman;
+                else if (city.Specialists[specIndex] == SpecialistType.Taxman) city.Specialists[specIndex] = SpecialistType.Scientist;
+                else city.Specialists[specIndex] = SpecialistType.Entertainer;
+                
+                onCitizensChanged?.Invoke();
+            }));
         }
     }
 
-    private Control createCitizenHead(string text, string tooltip, Color color)
+    private Control createCitizenHead(string text, string tooltip, Color color, Action onClick = null)
     {
         var box = new VBoxContainer();
         box.Alignment = BoxContainer.AlignmentMode.Center;
         box.TooltipText = tooltip;
 
-        var label = new Label { Text = text };
-        label.AddThemeFontSizeOverride("font_size", 28);
-        label.HorizontalAlignment = HorizontalAlignment.Center;
-        box.AddChild(label);
+        if (onClick != null)
+        {
+            var btn = new Button { Text = text, Flat = true, MouseDefaultCursorShape = CursorShape.PointingHand };
+            btn.AddThemeFontSizeOverride("font_size", 28);
+            btn.Pressed += onClick;
+            box.AddChild(btn);
+        }
+        else
+        {
+            var label = new Label { Text = text };
+            label.AddThemeFontSizeOverride("font_size", 28);
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            box.AddChild(label);
+        }
 
         // Tiny status bar under head
         var bar = new ColorRect { CustomMinimumSize = new Vector2(24, 4), Color = color };

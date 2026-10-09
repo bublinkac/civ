@@ -27,16 +27,15 @@ public partial class MapRenderer : TileMapLayer
     private CityRenderer? _cityRenderer;
     private BorderRenderer? _borderRenderer;
     private PollutionRenderer? _pollutionRenderer;
+    private SiteRenderer? _siteRenderer;
     private CityDetailPanel? _cityDetail; 
     private AdvisorsMenu? _advisorsMenu;
     private AdvisorScreen? _advisorScreen;
     private GovernmentPanel? _governmentPanel;
-    private HistographPanel? _histographPanel;
-    private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) || 
-                                       GodotObject.IsInstanceValid(_advisorsMenu) || 
+    private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) ||
+                                       GodotObject.IsInstanceValid(_advisorsMenu) ||
                                        GodotObject.IsInstanceValid(_advisorScreen) ||
-                                       GodotObject.IsInstanceValid(_governmentPanel) ||
-                                       GodotObject.IsInstanceValid(_histographPanel);
+                                       GodotObject.IsInstanceValid(_governmentPanel);
 
 
     private MainMenu? _mainMenu;
@@ -74,6 +73,9 @@ public partial class MapRenderer : TileMapLayer
         _advisorsMenu.OnOpenForeignAdvisor += OpenForeignAdvisor;
         _advisorsMenu.OnOpenCulturalAdvisor += OpenCulturalAdvisor;
         _advisorsMenu.OnOpenTradeAdvisor += OpenTradeAdvisor;
+        _advisorsMenu.OnOpenWonders += OpenWonders;
+        _advisorsMenu.OnOpenHistograph += OpenHistograph;
+        _advisorsMenu.OnOpenDemographics += OpenDemographics;
         
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_advisorsMenu);
         else AddChild(_advisorsMenu);
@@ -99,6 +101,8 @@ public partial class MapRenderer : TileMapLayer
         
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_advisorScreen);
         else AddChild(_advisorScreen);
+
+        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_advisor_open.wav");
     }
 
     public void OpenDomesticAdvisor() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Domestic);
@@ -119,15 +123,19 @@ public partial class MapRenderer : TileMapLayer
         else AddChild(_governmentPanel);
     }
 
-    public void OpenHistograph()
-    {
-        if (GodotObject.IsInstanceValid(_histographPanel)) _histographPanel.QueueFree();
-        if (_sim == null) return;
+    public void OpenWonders() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Wonders);
 
-        _histographPanel = new HistographPanel(_sim);
-        
-        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_histographPanel);
-        else AddChild(_histographPanel);
+    public void OpenHistograph() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Histograph);
+
+    public void OpenDemographics() => OpenAdvisorScreen(AdvisorScreen.AdvisorTab.Demographics);
+
+    public void OpenEspionage()
+    {
+        if (_sim == null) return;
+        var esp = new EspionageScreen(_sim);
+        esp.OnClosed += () => UpdateUiAfterAction();
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(esp);
+        else AddChild(esp);
     }
 
     public override void _Ready()
@@ -239,11 +247,21 @@ public partial class MapRenderer : TileMapLayer
         _pollutionRenderer = new PollutionRenderer();
         GetParent().CallDeferred(Node.MethodName.AddChild, _pollutionRenderer);
 
+        // Instantiate Site renderer
+        _siteRenderer = new SiteRenderer();
+        _siteRenderer.Initialize(this);
+        GetParent().CallDeferred(Node.MethodName.AddChild, _siteRenderer);
+
         // Instantiate HUD
         _hud = new GameHud();
         _hud.OnActionTriggered += HandleHudAction;
         _hud.OnMinimapTileSelected += HandleMinimapTileSelected;
         GetParent().CallDeferred(Node.MethodName.AddChild, _hud);
+
+        // Golden Age events
+        _sim.PlayerGoldenAge.OnGoldenAgeStarted += (faction, reason) => _hud?.ShowNotification("GOLDEN AGE!", $"{faction} has entered a Golden Age!\n({reason})\n+1 Production and +1 Commerce for 20 turns.");
+        _sim.PlayerGoldenAge.OnGoldenAgeEnded += (faction) => _hud?.ShowNotification("GOLDEN AGE ENDED", $"The Golden Age for {faction} has ended.");
+        _sim.AiGoldenAge.OnGoldenAgeStarted += (faction, reason) => _hud?.ShowNotification("GOLDEN AGE!", $"{faction} has entered a Golden Age!\n({reason})");
 
         // Defer initial updates until both renderers are ready in the scene tree
         Callable.From(() =>
@@ -255,6 +273,7 @@ public partial class MapRenderer : TileMapLayer
             }
             _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
             _cityRenderer.UpdateCities(_sim);
+            _siteRenderer.UpdateSites(_sim);
             _borderRenderer.UpdateBorders(_sim);
             _pollutionRenderer?.UpdatePollution(_sim);
             Unit? initial = _sim.Units.Find(u => u.Id == _selectedUnitId);
@@ -862,6 +881,7 @@ public partial class MapRenderer : TileMapLayer
                     _selectedCityId = null;
                     GD.Print("[Selection] Cleared selection.");
                 }
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_click.wav");
 
                 _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
                 Unit? selUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
@@ -895,6 +915,7 @@ public partial class MapRenderer : TileMapLayer
                                 _selectedUnitId = null;
                                 selectedUnit = null;
                             }
+                            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
 
                             _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
                             _fogRenderer.UpdateFog(_sim);
@@ -905,6 +926,7 @@ public partial class MapRenderer : TileMapLayer
                     else
                     {
                         GD.Print($"[Move/Attack] Invalid action to ({targetCell.X}, {targetCell.Y}) | Reason: {validation.GetMessage()}");
+                        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_error.wav");
                     }
                 }
             }
@@ -917,6 +939,7 @@ public partial class MapRenderer : TileMapLayer
             {
                 _sim.EndTurn();
                 GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
                 
                 // Clear selection if selected unit died during barbarian turn!
                 if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
@@ -965,21 +988,19 @@ public partial class MapRenderer : TileMapLayer
                     }
                 }
             }
-            else if ((keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R) && !string.IsNullOrEmpty(_selectedUnitId))
+            else if ((keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R || keyEvent.Keycode == Key.Y || keyEvent.Keycode == Key.S || keyEvent.Keycode == Key.A || keyEvent.Keycode == Key.E || keyEvent.Keycode == Key.P || keyEvent.Keycode == Key.U) && !string.IsNullOrEmpty(_selectedUnitId))
             {
                 Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                if (selectedUnit != null && selectedUnit.Type == UnitType.Worker)
+                if (selectedUnit != null)
                 {
-                    if (selectedUnit.Faction != Faction.Player)
+                    if (selectedUnit.Type == UnitType.Worker && (keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R))
                     {
-                        if (keyEvent.Keycode == Key.R)
+                        if (selectedUnit.Faction != Faction.Player)
                         {
-                            // Avoid collision with any other hotkeys if selected unit is not owned by player
+                            if (keyEvent.Keycode == Key.R) return;
+                            GD.Print("[Control] Cannot command other factions' workers!");
                             return;
                         }
-                        GD.Print("[Control] Cannot command other factions' workers!");
-                        return;
-                    }
 
                     if (selectedUnit.IsWorkerBuilding())
                     {
@@ -1049,7 +1070,16 @@ public partial class MapRenderer : TileMapLayer
                             _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
                             _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
                         }
+                        }
                     }
+                    
+                    if (keyEvent.Keycode == Key.F) HandleHudAction("fortify");
+                    else if (keyEvent.Keycode == Key.Y) HandleHudAction("sentry");
+                    else if (keyEvent.Keycode == Key.S) HandleHudAction("sleep");
+                    else if (keyEvent.Keycode == Key.P) HandleHudAction("pillage");
+                    else if (keyEvent.Keycode == Key.A) HandleHudAction("automate");
+                    else if (keyEvent.Keycode == Key.E) HandleHudAction("explore");
+                    else if (keyEvent.Keycode == Key.U) HandleHudAction("upgrade");
                 }
             }
             else if (keyEvent.Keycode == Key.P && !string.IsNullOrEmpty(_selectedCityId))
@@ -1057,34 +1087,36 @@ public partial class MapRenderer : TileMapLayer
                 City? selectedCity = _sim.Cities.Find(c => c.Id == _selectedCityId);
                 if (selectedCity != null)
                 {
-                        _sim.CycleCityProduction(selectedCity);
-                        GD.Print($"[Production Queue] {selectedCity.Name} changed project to: {selectedCity.CurrentProject} (Cost: {selectedCity.GetProjectCost(selectedCity.CurrentProject)} Prod)");
-                        _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
-                    }
+                    _sim.CycleCityProduction(selectedCity);
+                    GD.Print($"[Production Queue] {selectedCity.Name} changed project to: {selectedCity.CurrentProject} (Cost: {selectedCity.GetProjectCost(selectedCity.CurrentProject)} Prod)");
+                    _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
                 }
+            }
             else if (keyEvent.Keycode == Key.C && !string.IsNullOrEmpty(_selectedCityId))
             {
-                    City? selectedCity = _sim.Cities.Find(c => c.Id == _selectedCityId);
+                City? selectedCity = _sim.Cities.Find(c => c.Id == _selectedCityId);
                 if (selectedCity != null)
-                    {
+                {
                     OpenCityDetail(selectedCity);
-                    }
                 }
+            }
             else if (keyEvent.Keycode == Key.T)
             {
                 _sim.Research.CycleResearch();
                 string projectInfo = _sim.Research.CurrentResearch?.Name ?? "None (Idle)";
                 GD.Print($"[Research Queue] Active research project changed to: {projectInfo}");
-        _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
-    }
+                _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
+            }
             else if (keyEvent.Keycode == Key.F1) { OpenDomesticAdvisor(); }
             else if (keyEvent.Keycode == Key.F2) { OpenTradeAdvisor(); }
             else if (keyEvent.Keycode == Key.F3) { OpenMilitaryAdvisor(); }
             else if (keyEvent.Keycode == Key.F4) { OpenForeignAdvisor(); }
             else if (keyEvent.Keycode == Key.F5) { OpenCulturalAdvisor(); }
             else if (keyEvent.Keycode == Key.F6) { OpenTechTree(); }
-            else if (keyEvent.Keycode == Key.F7) { OpenGovernment(); }
-            else if (keyEvent.Keycode == Key.F8) { OpenHistograph(); }
+            else if (keyEvent.Keycode == Key.F7) { OpenWonders(); }
+            else if (keyEvent.Keycode == Key.F8) { OpenGovernment(); }
+            else if (keyEvent.Keycode == Key.F9) { OpenHistograph(); }
+            else if (keyEvent.Keycode == Key.F11) { OpenDemographics(); }
         }
     }
 
@@ -1102,6 +1134,7 @@ public partial class MapRenderer : TileMapLayer
                     ISaveSystem saveSystem = new JsonSaveSystem();
                     saveSystem.Save("save_slot_1", _sim);
                     GD.Print("[Save System] Game saved successfully!");
+                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_save.wav");
                 }
                 break;
 
@@ -1135,6 +1168,7 @@ public partial class MapRenderer : TileMapLayer
             case "end_turn":
                 _sim.EndTurn();
                 GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
                 if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
                 {
                     _selectedUnitId = null;
@@ -1154,6 +1188,7 @@ public partial class MapRenderer : TileMapLayer
                             if (city != null)
                             {
                                 GD.Print($"[City Manager] {city.Name} has been founded at ({city.X}, {city.Y})!");
+                                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/city_founded.wav");
                                 _selectedUnitId = null;
                                 _selectedCityId = null;
                                 UpdateUiAfterAction();
@@ -1169,6 +1204,15 @@ public partial class MapRenderer : TileMapLayer
             case "road":
             case "railroad":
             case "clean_pollution":
+            case "clear_forest":
+            case "clear_jungle":
+            case "clear_marsh":
+            case "plant_forest":
+            case "airfield":
+            case "radar_tower":
+            case "fortress":
+            case "barricade":
+            case "outpost":
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
@@ -1183,6 +1227,15 @@ public partial class MapRenderer : TileMapLayer
                             "road" => new RoadBuild(),
                             "railroad" => new RailroadBuild(),
                             "clean_pollution" => new CleanPollution(),
+                            "clear_forest" => new ClearForest(),
+                            "clear_jungle" => new ClearJungle(),
+                            "clear_marsh" => new ClearMarsh(),
+                            "plant_forest" => new PlantForest(),
+                            "airfield" => new AirfieldImprovement(),
+                            "radar_tower" => new RadarTowerImprovement(),
+                            "fortress" => new Fortress(),
+                            "barricade" => new Barricade(),
+                            "outpost" => new Outpost(),
                             _ => null
                         };
                         if (imp != null)
@@ -1237,6 +1290,7 @@ public partial class MapRenderer : TileMapLayer
 
                                 selectedUnit.StartImprovement(imp);
                                 GD.Print($"[Worker] Started building {imp.Name} at ({selectedUnit.X}, {selectedUnit.Y})!");
+                                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/worker_build.wav");
                                 UpdateUiAfterAction();
                             }
                         }
@@ -1280,7 +1334,69 @@ public partial class MapRenderer : TileMapLayer
                     {
                         selectedUnit.IsFortified = false;
                         selectedUnit.IsSleeping = false;
+                        selectedUnit.IsSentry = false;
+                        selectedUnit.IsAutomated = false;
                         GD.Print($"[Unit] {selectedUnit.Type} woke up at ({selectedUnit.X}, {selectedUnit.Y}).");
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
+            case "sentry":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    {
+                        selectedUnit.IsSentry = true;
+                        selectedUnit.RemainingMovement = 0;
+                        GD.Print($"[Unit] {selectedUnit.Type} went on sentry duty at ({selectedUnit.X}, {selectedUnit.Y}).");
+                        UpdateUiAfterAction();
+                    }
+                }
+                break;
+
+            case "upgrade":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    {
+                        if (_sim.UpgradeUnit(selectedUnit))
+                        {
+                            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_upgrade.wav"); // optional sound
+                            UpdateUiAfterAction();
+                        }
+                    }
+                }
+                break;
+
+            case "pillage":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    {
+                        if (_sim.ExecutePillage(selectedUnit))
+                        {
+                            GD.Print($"[Unit] {selectedUnit.Type} pillaged improvements at ({selectedUnit.X}, {selectedUnit.Y}).");
+                            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav"); // temp pillage sound
+                            UpdateUiAfterAction();
+                        }
+                    }
+                }
+                break;
+
+            case "automate":
+            case "explore":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    {
+                        selectedUnit.IsAutomated = true;
+                        selectedUnit.RemainingMovement = 0;
+                        GD.Print($"[Unit] {selectedUnit.Type} automated/exploring at ({selectedUnit.X}, {selectedUnit.Y}).");
                         UpdateUiAfterAction();
                     }
                 }
@@ -1328,13 +1444,47 @@ public partial class MapRenderer : TileMapLayer
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
                     if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Land)
                     {
-                        var transport = _sim.Units.Find(u => u.Faction == selectedUnit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(selectedUnit) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= 1);
+                        var transport = _sim.Units.Find(u => u.Faction == selectedUnit.Faction && u.CanBoardTransport(selectedUnit) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= 1);
                         if (transport != null)
                         {
                             if (_sim.LoadUnitIntoTransport(selectedUnit, transport))
                             {
                                 GD.Print($"[Transport] {selectedUnit.Type} boarded {transport.Type}!");
                                 _selectedUnitId = transport.Id;
+                                UpdateUiAfterAction();
+                            }
+                        }
+                    }
+                }
+                break;
+
+            case "create_army":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Type == UnitType.GreatLeader)
+                    {
+                        if (_sim.CreateArmy(selectedUnit))
+                        {
+                            _selectedUnitId = null; // Leader is gone
+                            UpdateUiAfterAction();
+                        }
+                    }
+                }
+                break;
+
+            case "hurry_production":
+                if (!string.IsNullOrEmpty(_selectedUnitId))
+                {
+                    Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
+                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Type == UnitType.GreatLeader)
+                    {
+                        var city = _sim.Cities.Find(c => c.X == selectedUnit.X && c.Y == selectedUnit.Y && c.Faction == selectedUnit.Faction);
+                        if (city != null)
+                        {
+                            if (_sim.HurryProductionWithLeader(selectedUnit, city))
+                            {
+                                _selectedUnitId = null; // Leader is gone
                                 UpdateUiAfterAction();
                             }
                         }
@@ -1478,6 +1628,17 @@ public partial class MapRenderer : TileMapLayer
             case "open_histograph":
                 OpenHistograph();
                 break;
+
+            case "open_wonders":
+                OpenWonders();
+                break;
+
+            case "open_demographics":
+                OpenDemographics();
+                break;
+            case "open_espionage":
+                OpenEspionage();
+                break;
         }
     }
 
@@ -1488,6 +1649,7 @@ public partial class MapRenderer : TileMapLayer
         _fogRenderer.UpdateFog(_sim);
         _borderRenderer?.UpdateBorders(_sim);
         _cityRenderer?.UpdateCities(_sim);
+        _siteRenderer?.UpdateSites(_sim);
         _pollutionRenderer?.UpdatePollution(_sim);
         Unit? selUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
         _highlightRenderer?.UpdateHighlight(_sim, selUnit);
