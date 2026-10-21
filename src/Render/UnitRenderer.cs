@@ -157,10 +157,36 @@ public partial class UnitRenderer : Node2D
                         }
                         else
                         {
+                            Vector2 startPos = sprite.Position;
+
+                            // Face movement direction
+                            if (targetPos.X < startPos.X - 2)
+                                sprite.FlipH = true;
+                            else if (targetPos.X > startPos.X + 2)
+                                sprite.FlipH = false;
+
+                            // Procedural step animation: arch hop + forward motion
                             var tween = CreateTween();
-                            tween.TweenProperty(sprite, "position", targetPos, 0.22f)
+                            tween.SetParallel(true);
+                            tween.TweenProperty(sprite, "position:x", targetPos.X, 0.22f)
                                  .SetTrans(Tween.TransitionType.Quad)
-                                 .SetEase(Tween.EaseType.Out);
+                                 .SetEase(Tween.EaseType.InOut);
+
+                            // Hop up mid-step and settle down
+                            float hopPeakY = Math.Min(startPos.Y, targetPos.Y) - 6.0f;
+                            var yTween = CreateTween();
+                            yTween.TweenProperty(sprite, "position:y", hopPeakY, 0.11f)
+                                  .SetTrans(Tween.TransitionType.Sine)
+                                  .SetEase(Tween.EaseType.Out);
+                            yTween.TweenProperty(sprite, "position:y", targetPos.Y, 0.11f)
+                                  .SetTrans(Tween.TransitionType.Sine)
+                                  .SetEase(Tween.EaseType.In);
+
+                            // Subtle body tilt during movement
+                            float tilt = (targetPos.X >= startPos.X ? 1f : -1f) * 0.05f;
+                            var tiltTween = CreateTween();
+                            tiltTween.TweenProperty(sprite, "rotation", tilt, 0.10f);
+                            tiltTween.TweenProperty(sprite, "rotation", 0.0f, 0.12f);
                         }
                     }
                 }
@@ -382,8 +408,10 @@ public partial class UnitRenderer : Node2D
                 var img = Image.LoadFromFile(filePath);
                 if (img != null && !img.IsEmpty())
                 {
-                    GD.Print($"[UnitRenderer] Loaded PROCEDURAL texture for {type} from {filePath}");
-                    return ImageTexture.CreateFromImage(img);
+                    GD.Print($"[UnitRenderer] Loaded texture for {type} from {filePath}");
+                    var tex = ImageTexture.CreateFromImage(img);
+                    _unitTextureCache[type] = tex;
+                    return tex;
                 }
             }
             catch {}

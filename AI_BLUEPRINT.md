@@ -21,6 +21,7 @@ c:/_private/civ/
 ├── CivGame.csproj                  # Godot .NET C# project specification
 ├── DEVELOPMENT_PLAN.md             # Complete phase-by-phase implementation log & future backlog
 ├── AI_BLUEPRINT.md                 # Architecture, subsystem design, and engineering guidelines
+├── SIMULATION_AND_TESTING_ARCHITECTURE.md # Spectator, Headless & Monte Carlo simulation spec
 ├── README.md                       # Project overview, controls, build instructions
 ├── project.godot                   # Godot 4 engine configuration
 ├── assets/                         # Visual & sound assets (audio, textures, sprites, icons)
