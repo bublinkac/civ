@@ -64,6 +64,7 @@ public class TileData
     public bool IsPolluted { get; set; } = false;
     public string? OwnerCityId { get; set; }
     public TileImprovement? Improvement { get; set; }
+    public int ContinentId { get; set; } = 0;
 
     /// <summary>True for Ocean, Sea and Coast tiles — not counted as land for Domination.</summary>
     public bool IsOcean => Terrain.Id is "ocean" or "sea" or "coast";

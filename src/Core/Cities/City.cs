@@ -114,6 +114,7 @@ public enum ProductionProject
         Helicopter,
         CruiseMissile,
         TacticalNuke,
+        ICBM,
 
         // Buildings
         Granary,
@@ -187,6 +188,10 @@ public enum ProductionProject
         MarsColony,
         WorldBank,
         SpaceStation,
+        GreatLibrary,
+        TheoryOfEvolution,
+        MagellansVoyage,
+        HooverDam,
         // Small Wonders
         HeroicEpic,
         MilitaryAcademy,
@@ -237,6 +242,13 @@ public class City
     
     /// <summary>True if the city is celebrating 'We Love The King Day' (WLTKD).</summary>
     public bool IsWLTKD { get; set; } = false;
+    
+    /// <summary>True if disease struck this city in the current turn.</summary>
+    public bool HasDisease { get; set; } = false;
+
+    // Drafting
+    public int DraftsThisTurn { get; set; } = 0;
+    public System.Collections.Generic.List<int> DraftUnhappinessTimers { get; set; } = new();
 
 
     // Resource storage (accumulated yields)
@@ -318,7 +330,7 @@ public class City
             else if (b.Id == "research_lab") culturePerTurn += 2;
             else if (b is Wonder wonder)
             {
-                culturePerTurn += wonder.IsNationalWonder ? 1 : 2;
+                culturePerTurn += wonder.CulturePerTurn;
             }
         }
         return culturePerTurn;
@@ -370,6 +382,22 @@ public class City
             if (warWearinessUnhappy > 0)
             {
                 int fromHappy = Math.Min(happy, warWearinessUnhappy);
+                happy -= fromHappy;
+                unhappy += fromHappy;
+            }
+        }
+
+        // STEP 1b: Draft Unhappiness (20 turns per draft)
+        int draftUnhappiness = DraftUnhappinessTimers.Count;
+        if (draftUnhappiness > 0)
+        {
+            int toConvert = Math.Min(content, draftUnhappiness);
+            content -= toConvert;
+            unhappy += toConvert;
+            draftUnhappiness -= toConvert;
+            if (draftUnhappiness > 0)
+            {
+                int fromHappy = Math.Min(happy, draftUnhappiness);
                 happy -= fromHappy;
                 unhappy += fromHappy;
             }
@@ -453,6 +481,29 @@ public class City
             }
         }
 
+        // ═══════════════════════════════════════
+        // STEP 4.2: Entertainment Slider
+        // ═══════════════════════════════════════
+        if (Faction == Faction.Player && sim.PlayerEntertainmentRate > 0)
+        {
+            int rawCommerce = 0;
+            var centerTile = sim.Map.GetTile(X, Y);
+            if (centerTile != null) rawCommerce += Math.Max(1, centerTile.TotalYield.Commerce);
+            
+            foreach (var tilePos in WorkedTiles)
+            {
+                var t = sim.Map.GetTile(tilePos.X, tilePos.Y);
+                if (t != null && t.OwnerCityId == Id)
+                {
+                    rawCommerce += t.TotalYield.Commerce;
+                }
+            }
+            
+            int netCommerce = Math.Max(0, rawCommerce - LastTurnCorruption);
+            int luxuryGold = (netCommerce * sim.PlayerEntertainmentRate) / 100;
+            happyFaces += luxuryGold;
+        }
+
         // Happy faces: convert unhappy -> content first, then content -> happy
         if (unhappy > 0 && happyFaces > 0)
         {
@@ -520,6 +571,43 @@ public class City
     public bool HasTrait(CivTrait trait)
     {
         return Civilization != null && (Civilization.Trait1 == trait || Civilization.Trait2 == trait);
+    }
+
+    public bool CanDraft(GameSimulation sim)
+    {
+        if (Population <= 2) return false;
+        
+        var govType = Faction == Faction.Player ? sim.PlayerGovernment : sim.AiGovernment;
+        var gov = Government.Get(govType);
+        if (gov.DraftRate <= 0 || DraftsThisTurn >= gov.DraftRate) return false;
+
+        if (!sim.Research.IsResearched("tech_nationalism")) return false;
+
+        return true;
+    }
+
+    public void Draft(GameSimulation sim)
+    {
+        if (!CanDraft(sim)) return;
+
+        Population--;
+        DraftsThisTurn++;
+        DraftUnhappinessTimers.Add(20);
+
+        UnitType draftType = UnitType.Rifleman;
+        if (sim.Research.IsResearched("tech_robotics") || sim.Research.IsResearched("tech_computers"))
+            draftType = UnitType.MechInfantry;
+        else if (sim.Research.IsResearched("tech_replaceable_parts"))
+            draftType = UnitType.Infantry;
+            
+        var unit = new Unit(System.Guid.NewGuid().ToString(), draftType, X, Y, Faction, CivilizationId);
+        unit.SetExperience(ExperienceLevel.Conscript);
+        unit.Health = unit.MaxHealth;
+
+        sim.Units.Add(unit);
+        System.Console.WriteLine($"[Drafting] {Name} drafted a {draftType} (Conscript). Population is now {Population}.");
+        
+        UpdateCitizenMood(sim, sim.DifficultyConfig);
     }
 
     public bool IsCoastal(GameMap map)
@@ -688,6 +776,10 @@ public class City
             ProductionProject.MarsColony => "mars_colony",
             ProductionProject.WorldBank => "world_bank",
             ProductionProject.SpaceStation => "space_station",
+            ProductionProject.GreatLibrary => "great_library",
+            ProductionProject.TheoryOfEvolution => "theory_of_evolution",
+            ProductionProject.MagellansVoyage => "magellans_voyage",
+            ProductionProject.HooverDam => "hoover_dam",
             // Small Wonders
             ProductionProject.HeroicEpic => "heroic_epic",
             ProductionProject.MilitaryAcademy => "military_academy",

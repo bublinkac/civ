@@ -54,7 +54,7 @@ public static class VolcanoSystem
             {
                 if (dx == 0 && dy == 0) continue;
 
-                int tx = vx + dx;
+                int tx = sim.Map.NormalizeX(vx + dx);
                 int ty = vy + dy;
 
                 if (sim.Map.IsInBounds(tx, ty))

@@ -12,6 +12,7 @@ public abstract class Wonder : Building
     /// A wonder matching BOTH traits of a civ triggers its Golden Age when built.
     /// </summary>
     public virtual CivTrait[] AssociatedTraits => Array.Empty<CivTrait>();
+    public virtual int CulturePerTurn => IsNationalWonder ? 1 : 2;
     
     public override void OnCompleted(City city, GameSimulation sim)
     {
@@ -62,6 +63,7 @@ public static class WonderRegistry
             traits: new[] { CivTrait.Religious, CivTrait.Scientific }));
         Register(new GenericWonder("louvre", "Louvre", 800, "free_artistry",
             "Automatically obsolete all improvements. Doubles culture."));
+        Register(new GreatLibraryWonder());
 
         // Medieval Era Wonders
         Register(new GenericWonder("knights_hall", "Knights Hall", 300, "chivalry",
@@ -86,6 +88,7 @@ public static class WonderRegistry
             traits: new[] { CivTrait.Religious, CivTrait.Industrious }));
         Register(new GenericWonder("taj_mahal", "Taj Mahal", 500, "nationalism",
             "Makes 2 citizens happy. +2 culture. Obsolete if wonder never obsolete."));
+        Register(new MagellansVoyageWonder());
 
         // Industrial Era Wonders
         Register(new GenericWonder("astrolabe", "Astrolabe", 400, "astronomy",
@@ -101,6 +104,8 @@ public static class WonderRegistry
             traits: new[] { CivTrait.Industrious, CivTrait.Commercial }));
         Register(new GenericWonder("united_nations", "United Nations", 600, "the_corporation",
             "Diplomatic victory possible. +3 culture."));
+        Register(new TheoryOfEvolutionWonder());
+        Register(new HooverDamWonder());
 
         // Modern Era Wonders
         Register(new GenericWonder("manhattan_project", "Manhattan Project", 800, "fission",
@@ -196,5 +201,73 @@ public class GenericSmallWonder : SmallWonder
         Description = description;
         DefenseBonus = defenseBonus;
         CommerceMultiplier = commerceMultiplier;
+    }
+}
+
+public class GreatLibraryWonder : Wonder
+{
+    public override string Id => "great_library";
+    public override string Name => "The Great Library";
+    public override int ProductionCost => 400;
+    public override string? RequiredTechId => "literature";
+    public override CivTrait[] AssociatedTraits => new[] { CivTrait.Scientific, CivTrait.Commercial };
+    public override int CulturePerTurn => 6;
+    public string Description => "Grants all technologies discovered by rival civilizations. Obsoleted by Education.";
+
+    public override void OnCompleted(City city, GameSimulation sim)
+    {
+        base.OnCompleted(city, sim);
+        sim.ApplyGreatLibraryCatchup(city.Faction);
+    }
+}
+
+public class TheoryOfEvolutionWonder : Wonder
+{
+    public override string Id => "theory_of_evolution";
+    public override string Name => "Theory of Evolution";
+    public override int ProductionCost => 600;
+    public override string? RequiredTechId => "scientific_method";
+    public override CivTrait[] AssociatedTraits => new[] { CivTrait.Scientific };
+    public override int CulturePerTurn => 3;
+    public string Description => "Immediately grants 2 free scientific advances upon completion.";
+
+    public override void OnCompleted(City city, GameSimulation sim)
+    {
+        base.OnCompleted(city, sim);
+        sim.GrantFreeTechnologies(city.Faction, 2);
+    }
+}
+
+public class MagellansVoyageWonder : Wonder
+{
+    public override string Id => "magellans_voyage";
+    public override string Name => "Magellan's Voyage";
+    public override int ProductionCost => 400;
+    public override string? RequiredTechId => "navigation";
+    public override CivTrait[] AssociatedTraits => new[] { CivTrait.Seafaring, CivTrait.Expansionist };
+    public override int CulturePerTurn => 3;
+    public string Description => "Increases movement of all naval units by +2.";
+
+    public override void OnCompleted(City city, GameSimulation sim)
+    {
+        base.OnCompleted(city, sim);
+        sim.UpdateUnitMovementBonuses();
+    }
+}
+
+public class HooverDamWonder : Wonder
+{
+    public override string Id => "hoover_dam";
+    public override string Name => "Hoover Dam";
+    public override int ProductionCost => 800;
+    public override string? RequiredTechId => "electronics";
+    public override CivTrait[] AssociatedTraits => new[] { CivTrait.Agricultural, CivTrait.Industrious };
+    public override int CulturePerTurn => 2;
+    public string Description => "Acts as a clean Hydro Plant (+50% production with Factory, 0 pollution) for all cities on the continent.";
+
+    public override void OnCompleted(City city, GameSimulation sim)
+    {
+        base.OnCompleted(city, sim);
+        System.Console.WriteLine($"[Wonder] Hoover Dam completed in {city.Name}! Clean hydro power active for all continent cities.");
     }
 }

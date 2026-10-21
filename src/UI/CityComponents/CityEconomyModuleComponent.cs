@@ -145,62 +145,9 @@ public partial class CityEconomyModuleComponent : PanelContainer
         vbox.AddChild(new HSeparator());
 
         // --- 3. GARRISON SECTION ---
-        var garVBox = new VBoxContainer();
-        garVBox.AddThemeConstantOverride("separation", 2);
-        garVBox.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        vbox.AddChild(garVBox);
-
-        var garTitle = new Label { Text = "GARRISON" };
-        garTitle.AddThemeFontSizeOverride("font_size", 11);
-        garTitle.AddThemeColorOverride("font_color", new Color(0.2f, 0.15f, 0.1f));
-        garVBox.AddChild(garTitle);
-
-        var garScroll = new ScrollContainer();
-        garScroll.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        garScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-        garVBox.AddChild(garScroll);
-
-        var garList = new VBoxContainer();
-        garScroll.AddChild(garList);
-
-        // Find units in this city
-        var stationedUnits = sim.Units.Where(u => u.X == city.X && u.Y == city.Y).ToList();
-        if (stationedUnits.Count == 0)
-        {
-            var emptyLabel = new Label { Text = "No units stationed" };
-            emptyLabel.AddThemeFontSizeOverride("font_size", 10);
-            emptyLabel.AddThemeColorOverride("font_color", new Color(0.5f, 0.45f, 0.4f));
-            garList.AddChild(emptyLabel);
-        }
-        else
-        {
-            foreach (var unit in stationedUnits)
-            {
-                var row = new HBoxContainer();
-                row.AddThemeConstantOverride("separation", 6);
-
-                string icon = unit.Type switch
-                {
-                    UnitType.Settler => "🧑‍🤝‍🧑",
-                    UnitType.Worker => "⚒️",
-                    UnitType.Explorer => "🧭",
-                    UnitType.Warrior => "⚔️",
-                    UnitType.Archer => "🏹",
-                    _ => "💂"
-                };
-
-                var iconLabel = new Label { Text = icon };
-                iconLabel.AddThemeFontSizeOverride("font_size", 12);
-                row.AddChild(iconLabel);
-
-                var unitName = new Label { Text = $"{unit.Type} ({unit.Health}/{unit.MaxHealth} HP)" };
-                unitName.AddThemeFontSizeOverride("font_size", 10);
-                unitName.AddThemeColorOverride("font_color", new Color(0.1f, 0.1f, 0.12f));
-                row.AddChild(unitName);
-
-                garList.AddChild(row);
-            }
-        }
+        var garrisonComp = new CityGarrisonComponent(city, sim);
+        garrisonComp.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        vbox.AddChild(garrisonComp);
     }
 
     private Color hasAccessColor(bool has)

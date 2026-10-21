@@ -401,7 +401,8 @@ public partial class CityProductionSelectionDialog : CanvasLayer
             UnitType.StealthBomber,
             UnitType.Helicopter,
             UnitType.CruiseMissile,
-            UnitType.TacticalNuke
+            UnitType.TacticalNuke,
+            UnitType.ICBM
         };
 
         foreach (var baseType in standardUnits)
@@ -511,6 +512,10 @@ public partial class CityProductionSelectionDialog : CanvasLayer
             (production: ProductionProject.MarsColony, buildingId: "mars_colony"),
             (production: ProductionProject.WorldBank, buildingId: "world_bank"),
             (production: ProductionProject.SpaceStation, buildingId: "space_station"),
+            (production: ProductionProject.GreatLibrary, buildingId: "great_library"),
+            (production: ProductionProject.TheoryOfEvolution, buildingId: "theory_of_evolution"),
+            (production: ProductionProject.MagellansVoyage, buildingId: "magellans_voyage"),
+            (production: ProductionProject.HooverDam, buildingId: "hoover_dam"),
 
             // Small Wonders
             (production: ProductionProject.HeroicEpic, buildingId: "heroic_epic"),

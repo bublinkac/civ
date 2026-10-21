@@ -23,6 +23,16 @@ public class JsonSaveSystem : ISaveSystem
 
     public void Save(string slotName, GameSimulation sim)
     {
+        var dto = CreateDtoFromSimulation(sim);
+        string path = GetSavePath(slotName);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        string json = JsonSerializer.Serialize(dto, options);
+        File.WriteAllText(path, json);
+        Console.WriteLine($"[Save System] Game state successfully saved to: {path}");
+    }
+
+    public static SaveDataDto CreateDtoFromSimulation(GameSimulation sim)
+    {
         var dto = new SaveDataDto
         {
             TurnNumber = sim.TurnNumber,
@@ -30,23 +40,70 @@ public class JsonSaveSystem : ISaveSystem
             EndState = sim.EndState,
             PlayerCivId = sim.PlayerCivId,
             AiCivId = sim.AiCivId,
+            Difficulty = sim.Difficulty,
+
+            // Government & Revolution
+            PlayerGovernment = sim.PlayerGovernment,
+            AiGovernment = sim.AiGovernment,
+            PendingGovernment = sim.PendingGovernment,
+            AnarchyTurnsRemaining = sim.AnarchyTurnsRemaining,
+
+            // Golden Age
+            PlayerGoldenAgeIsActive = sim.PlayerGoldenAge.IsActive,
+            PlayerGoldenAgeTurnsRemaining = sim.PlayerGoldenAge.TurnsRemaining,
+            PlayerGoldenAgeHasBeenUsed = sim.PlayerGoldenAge.HasBeenUsed,
+            AiGoldenAgeIsActive = sim.AiGoldenAge.IsActive,
+            AiGoldenAgeTurnsRemaining = sim.AiGoldenAge.TurnsRemaining,
+            AiGoldenAgeHasBeenUsed = sim.AiGoldenAge.HasBeenUsed,
+
+            // War Weariness
+            WarWearinessPoints = sim.WarWearinessPoints,
+            WarStartTurn = sim.WarStartTurn,
+            IsDefensiveWar = sim.IsDefensiveWar,
+            PeaceTurns = sim.PeaceTurns,
+
+            // Economy
             PlayerTreasury = sim.PlayerTreasury,
             PlayerTaxRate = sim.PlayerTaxRate,
+            PlayerEntertainmentRate = sim.PlayerEntertainmentRate,
             LastTurnIncome = sim.LastTurnIncome,
             LastTurnMaintenance = sim.LastTurnMaintenance,
             LastTurnScience = sim.LastTurnScience,
             LastTurnNetGold = sim.LastTurnNetGold,
             CurrentResearchId = sim.Research.CurrentResearch?.Id,
             CurrentScienceProgress = sim.Research.CurrentScienceProgress,
-            LastTurnScienceGenerated = sim.Research.LastTurnScienceGenerated
+            LastTurnScienceGenerated = sim.Research.LastTurnScienceGenerated,
+
+            // Multiplayer
+            Mode = sim.Mode,
+            ActiveTurnFaction = sim.ActiveTurnFaction,
+            Player1Name = sim.Player1Name,
+            Player2Name = sim.Player2Name,
+            AiTreasury = sim.AiTreasury,
+            AiTaxRate = sim.AiTaxRate,
+            AiEntertainmentRate = sim.AiEntertainmentRate
         };
 
-        // Flatten Visibility Grid
+        // Embassies & Spies
+        foreach (var emb in sim.Diplomacy.Embassies)
+        {
+            dto.Embassies.Add($"{emb.From},{emb.To}");
+        }
+        foreach (var spy in sim.Diplomacy.Spies)
+        {
+            dto.Spies.Add($"{spy.From},{spy.To}");
+        }
+
+        // Flatten Visibility Grids
         for (int x = 0; x < sim.Map.Width; x++)
         {
             for (int y = 0; y < sim.Map.Height; y++)
             {
                 dto.VisibilityGridFlat.Add((int)sim.VisibilityGrid[x, y]);
+                if (sim.Player2VisibilityGrid != null)
+                {
+                    dto.Player2VisibilityGridFlat.Add((int)sim.Player2VisibilityGrid[x, y]);
+                }
             }
         }
 
@@ -89,7 +146,12 @@ public class JsonSaveSystem : ISaveSystem
                 ImprovementName = unit.ImprovementUnderConstruction?.Name,
                 ConstructionTurnsRemaining = unit.ConstructionTurnsRemaining,
                 IsFortified = unit.IsFortified,
-                IsSleeping = unit.IsSleeping
+                IsSleeping = unit.IsSleeping,
+                IsSentry = unit.IsSentry,
+                Experience = unit.Experience,
+                TransportUnitId = unit.TransportUnitId,
+                LoadedUnitIds = unit.LoadedUnitIds.ToList(),
+                HasGeneratedLeader = unit.HasGeneratedLeader
             });
         }
 
@@ -115,7 +177,10 @@ public class JsonSaveSystem : ISaveSystem
                 Faction = city.Faction,
                 CivilizationId = city.CivilizationId,
                 IsCapital = city.IsCapital,
-                AccumulatedCulture = city.AccumulatedCulture
+                AccumulatedCulture = city.AccumulatedCulture,
+                Specialists = city.Specialists.ToList(),
+                DisorderTurns = city.DisorderTurns,
+                IsWLTKD = city.IsWLTKD
             };
 
             foreach (var building in city.Buildings)
@@ -157,13 +222,7 @@ public class JsonSaveSystem : ISaveSystem
         dto.PlayerHistograph = new(sim.Histograph.PlayerHistory);
         dto.AiHistograph = new(sim.Histograph.AiHistory);
 
-        // Serialize to file
-        string path = GetSavePath(slotName);
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        string json = JsonSerializer.Serialize(dto, options);
-        File.WriteAllText(path, json);
-
-        Console.WriteLine($"[Save System] Game state successfully saved to: {path}");
+        return dto;
     }
 
     public bool Load(string slotName, GameSimulation sim)
@@ -200,6 +259,7 @@ public class JsonSaveSystem : ISaveSystem
                 dto.AiCivId,
                 dto.PlayerTreasury,
                 dto.PlayerTaxRate,
+                dto.PlayerEntertainmentRate,
                 dto.LastTurnIncome,
                 dto.LastTurnMaintenance,
                 dto.LastTurnScience,
@@ -214,6 +274,53 @@ public class JsonSaveSystem : ISaveSystem
                 camps,
                 dto.AiResearchedTechIds
             );
+
+            // Restore Government & Revolution
+            sim.PlayerGovernment = dto.PlayerGovernment;
+            sim.AiGovernment = dto.AiGovernment;
+            sim.PendingGovernment = dto.PendingGovernment;
+            sim.AnarchyTurnsRemaining = dto.AnarchyTurnsRemaining;
+            sim.Difficulty = dto.Difficulty;
+
+            // Restore Golden Age
+            sim.PlayerGoldenAge.IsActive = dto.PlayerGoldenAgeIsActive;
+            sim.PlayerGoldenAge.TurnsRemaining = dto.PlayerGoldenAgeTurnsRemaining;
+            sim.PlayerGoldenAge.HasBeenUsed = dto.PlayerGoldenAgeHasBeenUsed;
+            sim.AiGoldenAge.IsActive = dto.AiGoldenAgeIsActive;
+            sim.AiGoldenAge.TurnsRemaining = dto.AiGoldenAgeTurnsRemaining;
+            sim.AiGoldenAge.HasBeenUsed = dto.AiGoldenAgeHasBeenUsed;
+
+            // Restore War Weariness
+            sim.WarWearinessPoints = dto.WarWearinessPoints;
+            sim.WarStartTurn = dto.WarStartTurn;
+            sim.IsDefensiveWar = dto.IsDefensiveWar;
+            sim.PeaceTurns = dto.PeaceTurns;
+
+            // Restore Diplomacy Embassies and Spies
+            sim.Diplomacy.Embassies.Clear();
+            if (dto.Embassies != null)
+            {
+                foreach (var embStr in dto.Embassies)
+                {
+                    var parts = embStr.Split(',');
+                    if (parts.Length == 2 && Enum.TryParse<Faction>(parts[0], out var from) && Enum.TryParse<Faction>(parts[1], out var to))
+                    {
+                        sim.Diplomacy.Embassies.Add((from, to));
+                    }
+                }
+            }
+            sim.Diplomacy.Spies.Clear();
+            if (dto.Spies != null)
+            {
+                foreach (var spyStr in dto.Spies)
+                {
+                    var parts = spyStr.Split(',');
+                    if (parts.Length == 2 && Enum.TryParse<Faction>(parts[0], out var from) && Enum.TryParse<Faction>(parts[1], out var to))
+                    {
+                        sim.Diplomacy.Spies.Add((from, to));
+                    }
+                }
+            }
 
             // Restore AI research progress
             sim.AiCurrentResearchId = dto.AiCurrentResearchId;
@@ -235,8 +342,18 @@ public class JsonSaveSystem : ISaveSystem
             sim.Histograph.AiHistory.Clear();
             sim.Histograph.AiHistory.AddRange(dto.AiHistograph);
 
-            // Reconstruct Visibility Grid
+            // Restore Multiplayer state
+            sim.Mode = dto.Mode;
+            sim.ActiveTurnFaction = dto.ActiveTurnFaction;
+            sim.Player1Name = string.IsNullOrEmpty(dto.Player1Name) ? "Player 1" : dto.Player1Name;
+            sim.Player2Name = string.IsNullOrEmpty(dto.Player2Name) ? "Player 2" : dto.Player2Name;
+            sim.AiTreasury = dto.AiTreasury;
+            sim.AiTaxRate = dto.AiTaxRate;
+            sim.AiEntertainmentRate = dto.AiEntertainmentRate;
+
+            // Reconstruct Visibility Grids
             int index = 0;
+            int p2Index = 0;
             for (int x = 0; x < sim.Map.Width; x++)
             {
                 for (int y = 0; y < sim.Map.Height; y++)
@@ -245,8 +362,14 @@ public class JsonSaveSystem : ISaveSystem
                     {
                         sim.VisibilityGrid[x, y] = (FogState)dto.VisibilityGridFlat[index++];
                     }
+                    if (sim.Player2VisibilityGrid != null && p2Index < dto.Player2VisibilityGridFlat.Count)
+                    {
+                        sim.Player2VisibilityGrid[x, y] = (FogState)dto.Player2VisibilityGridFlat[p2Index++];
+                    }
                 }
             }
+
+            sim.UpdateUnitMovementBonuses();
 
             Console.WriteLine($"[Save System] Game state successfully loaded from: {path}");
             return true;
@@ -306,5 +429,50 @@ public class JsonSaveSystem : ISaveSystem
             Console.WriteLine($"[Save System] Failed to reconstruct loaded game: {ex.Message}");
         }
         return null;
+    }
+
+    public static string SerializeDto(SaveDataDto dto)
+    {
+        return JsonSerializer.Serialize(dto, new JsonSerializerOptions { WriteIndented = false });
+    }
+
+    public static SaveDataDto? DeserializeDto(string json)
+    {
+        return JsonSerializer.Deserialize<SaveDataDto>(json);
+    }
+
+    public static GameSimulation? ReconstructFromDto(SaveDataDto dto)
+    {
+        if (dto == null || dto.Tiles.Count == 0) return null;
+
+        int width = dto.Tiles.Max(t => t.X) + 1;
+        int height = dto.Tiles.Max(t => t.Y) + 1;
+
+        var map = new GameMap(width, height);
+        var grassland = TerrainRegistry.Get("grassland") ?? TerrainRegistry.All.Values.First();
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                map.SetTile(x, y, new TileData(x, y, grassland));
+            }
+        }
+
+        var sim = new GameSimulation(map);
+        var saveSystem = new JsonSaveSystem();
+        // Temporary write and load or apply DTO directly
+        string tempJson = SerializeDto(dto);
+        string tempSlot = $"temp_network_sync_{Guid.NewGuid().ToString().Substring(0, 8)}";
+        string path = saveSystem.GetSavePath(tempSlot);
+        try
+        {
+            File.WriteAllText(path, tempJson);
+            saveSystem.Load(tempSlot, sim);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        return sim;
     }
 }

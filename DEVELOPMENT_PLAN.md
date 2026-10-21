@@ -588,3 +588,120 @@ Full 6-advisor system matching Civ3's F1-F6 keybinding layout.
 ### 3. UI/Visuals
 - [x] Show a notification when it starts/ends.
 - [x] Update City UI (CityProductionQueueComponent) to reflect the Golden Age bonus yields.
+
+---
+
+## Phase 40: Multiplayer Architecture (Hotseat & Peer-to-Peer TCP/LAN) (COMPLETED)
+
+### 1. Network Protocol & Synchronization (`src/Network/CivNetworkManager.cs`)
+- [x] **Full-State Synchronization:** Serializes `SaveDataDto` into JSON payload packets with framing (`\n`) transmitted over raw TCP sockets.
+- [x] **Host & Client Modes:** Asynchronous TCP listener (`TcpListener`) for Host and non-blocking TCP socket (`TcpClient`) for Joiner with configurable IP and Port (default `7777`).
+- [x] **Game Session Initialization:**
+  - Host initiates session upon connection, sends initial world generation seed, difficulty, civilization assignments, and full `SaveDataDto` state.
+  - Client reconstructs simulation state directly from initial DTO, mirroring the world deterministically.
+- [x] **Turn-Handoff Protocol:**
+  - Upon ending turn, the active player serializes full delta/state and transmits a `turn_state` message.
+  - Non-active player UI blocks unit commands until their turn packet is received and ingested.
+- [x] **Network Polling:** Integrated non-blocking message processing (`CivNetworkManager.Instance.PollMessages()`) directly into `MapRenderer._Process(delta)`.
+
+### 2. Hotseat Local Multiplayer Mode (`src/UI/HotseatTransitionModal.cs`)
+- [x] **Same-Machine Play:** Supports two players alternating turns on one computer without networking.
+- [x] **Privacy Transition Modal:** Full-screen modal concealing the map between turns with "Pass Device / End of Turn" notification to prevent screen peeking.
+- [x] **Independent Fog of War:** Player 1 uses `VisibilityGrid` while Player 2 uses `Player2VisibilityGrid`. Camera and fog layer swap immediately when turn changes.
+- [x] **Turn Sovereignty:** `CanControlFaction(unit.Faction)` enforces that only the active faction player can issue commands or move units.
+
+### 3. Multiplayer Lobby UI (`src/UI/MultiplayerMenu.cs`)
+- [x] **Mode Selection:** Host LAN Game, Join LAN Game, and Local Hotseat options accessible directly from `MainMenu`.
+- [x] **Connection Form:** Dynamic text fields for IP Address and Port with status feedback indicators (Waiting, Connected, Error).
+
+---
+
+## Phase 41: Cylindrical Globe Geometry & East-West World Wrap (COMPLETED)
+
+### 1. Mathematical Globe Topology (`src/Core/GameMap.cs`)
+- [x] **Cylindrical Seam:** East-West boundary wrapping enabled via `WrapsX = true`, seamlessly linking $X = 0$ with $X = \text{Width} - 1$.
+- [x] **Coordinate Normalization:** `NormalizeX(int x)` handles modulo wrapping for any positive or negative coordinate offset.
+- [x] **Shortest Distance Metrics:**
+  - `GetDeltaX(int x1, int x2)`: Computes $\min(|x_1 - x_2|, \text{Width} - |x_1 - x_2|)$.
+  - `GetChebyshevDistance(x1, y1, x2, y2)`: $\max(\Delta X, |y_1 - y_2|)$ for 8-way unit movement, vision, bombard range, and air strikes.
+  - `GetManhattanDistance(x1, y1, x2, y2)`: $\Delta X + |y_1 - y_2|$ for city separation checks and worker assignment heuristics.
+  - `GetCiv3Distance(x1, y1, x2, y2)`: $\max + \lfloor\min / 2\rfloor$ for authentic Civ3 distance-based capital corruption and waste calculations.
+  - `GetStepDirectionX(int fromX, int toX)`: Determines optimal sign (-1, 0, +1) taking the shorter path across the cylindrical seam.
+- [x] **Global Continent Flood-Fill:** `CalculateContinents()` wraps across the boundary so landmasses spanning $X = 0$ and $X = \text{Width} - 1$ receive identical `ContinentId`s.
+
+### 2. Simulation Systems & Safe Array Bounds (`src/Core/GameSimulation.cs`)
+- [x] **Unit Movement & Zone of Control:** `ValidateUnitMove` and `MoveUnit` allow seamless traversal across $X = 0 \leftrightarrow X = \text{Width} - 1$. ZOC checks wrap properly.
+- [x] **Vision Grids (Fog of War):** `UpdateVisibility` normalizes $X$ prior to indexing `VisibilityGrid[x, y]`, preventing `IndexOutOfRangeException` while revealing shroud on the opposite edge of the globe.
+- [x] **Cultural Borders & City Flipping:** `UpdateCityBorders` projects border tiles across the seam, and `CheckCulturalFlipping` computes influence distance across the cylinder.
+- [x] **Infrastructure & Resources:**
+  - `UpdateTradeNetworks`: BFS trade road/railroad pathing wraps East-West across the globe.
+  - `HasFreshWaterAccess` and `HasIrrigationAccess`: Water and farm chains propagate across the seam.
+- [x] **Cataclysms & Spreading:** Volcano eruptions and toxic pollution spread across boundaries.
+- [x] **Naval Logistics:** Transport boarding (`LoadUnitIntoTransport`) and disembarkation (`UnloadUnitFromTransport`) calculate adjacency via `GetChebyshevDistance`.
+
+### 3. Pathfinding (`src/Core/Pathfinding/Pathfinder.cs`)
+- [x] **Cross-Seam A* Navigation:** 8-neighbor expansion normalizes neighbor X (`nx = _map.NormalizeX(cx + dx)`).
+- [x] **Admissible Heuristic:** Uses `_map.GetChebyshevDistance` to ensure shortest global paths across the cylindrical seam.
+
+### 4. Artificial Intelligence (`src/Core/AI/AiRivalBrain.cs`)
+- [x] **Global Spatial Awareness:** Settler site selection, worker automation, barbarian hunting, military sieges, and naval patrols evaluate candidate targets across the shortest East-West paths.
+
+### 5. Render & UI Seam Normalization
+- [x] **Input Normalization (`src/Render/MapRenderer.cs`):** Mouse coordinates (`LocalToMap`), left-click selection, right-click move, and tactical targeting actions normalize $X$.
+- [x] **Seam Animation Snapping (`src/Render/UnitRenderer.cs`):** Units wrapping across the seam snap immediately instead of tweening across the entire display screen.
+- [x] **Interactive City Grid (`src/UI/CityComponents/CityInteractiveMapComponent.cs`):** City detail 5x5 tile grid normalizes worker tiles for cities located on map edges.
+
+---
+
+## Phase 42: Tactical Targeting, Air Missions & City Conquest (COMPLETED)
+
+### 1. Tactical Reticle Overlay (`src/Render/TargetingReticleRenderer.cs`)
+- [x] **Interactive Tactical Grid:** Visual overlay displaying valid targeting tiles in glowing cyan and hostile targets in vibrant crimson with diamond tile geometry.
+- [x] **Mission Support:** Handles Artillery Bombardment, Naval Shore Bombardment, Air Strikes, Air Recon, and Air Rebase with real-time hovering reticles.
+- [x] **Cross-Seam Tactical Awareness:** Reticle range evaluation normalizes coordinates across the world seam.
+
+### 2. City Conquest & Liberation (`src/UI/CityCaptureDialog.cs`)
+- [x] **Capture Modal:** Triggers automatically when a hostile city's last defender is eliminated.
+- [x] **Strategic Options:**
+  - **Annex City:** Absorb city into your empire with resistance/disorder turns.
+  - **Raze City:** Burn the city to the ground, destroying infrastructure and removing it from the map.
+  - **Liberate City:** Return the city to its original founding civilization for major diplomatic goodwill.
+
+### 3. Great Military Leaders & Armies
+- [x] **Great Leader Spawning:** Elite unit victories have a chance to spawn a Great Leader.
+- [x] **Create Army:** Great Leader can transform into an Army capable of loading multiple combat units for devastating multi-attack assaults.
+- [x] **Hurry Production:** Great Leader can sacrifice themselves in a friendly city to instantly complete any current building or Great Wonder.
+
+---
+
+## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
+
+This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
+
+### Phase 43: Trade Routes & Commercial Agreements (High Priority)
+- [ ] **Trade Advisor Enhancements (`src/UI/TradeAdvisorPanel.cs`):**
+  - Visualize all active bilateral trade agreements (Gold Per Turn treaties, Luxury imports/exports, Strategic resource deliveries).
+  - List remaining turns on 20-turn trade pacts with cancel/renegotiate options.
+- [ ] **Resource Depletion & Discovery:**
+  - Implement authentic Civ3 strategic resource depletion chances (e.g. Iron or Oil running dry) and sudden new discoveries in mountains/plains.
+
+### Phase 44: Cultural Influence Map Overlay & Flip Risk Predictor (Medium Priority)
+- [ ] **Cultural Advisor Map View (`src/UI/CulturalAdvisorPanel.cs`):**
+  - Add an interactive territory overlay showing cultural pressure zones between competing borders.
+  - Display numerical probability of cultural flipping for border cities based on distance to capitals, garrison strength, and culture ratio.
+
+### Phase 45: Advanced Naval Combat, Submarines & Stealth Mechanics (Medium Priority)
+- [ ] **Submarines & Stealth Units:**
+  - Implement invisible movement for Submarines and Stealth Fighters/Bombers (invisible to non-destroyer units unless bumped into).
+  - Add specialized Anti-Submarine Warfare (ASW) sonar detection rules for Destroyers and Cruisers.
+
+### Phase 46: Civilopedia & In-Game Encyclopedia (Low Priority)
+- [ ] **Civilopedia UI:**
+  - Create a searchable in-game guide displaying game concepts, unit statistics, terrain yields, technology prerequisites, and historical background lore.
+
+### Phase 47: Audio & Era-Specific Atmospheric Soundscapes (Low Priority)
+- [ ] **Era BGM Switching:**
+  - Implement dynamic soundtrack switching based on the current era (Ancient, Middle Ages, Industrial, Modern).
+- [ ] **Combat & Unit Sound Effects:**
+  - Add dedicated sound clips for ranged artillery fire, horse gallops, tank treads, jet engines, and sword clashes.
+

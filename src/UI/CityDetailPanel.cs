@@ -88,6 +88,10 @@ public partial class CityDetailPanel : PanelContainer
         });
         middleVBox.AddChild(citizensComp);
 
+        // Granary & Food Storage Box
+        var granaryComp = new CityGranaryComponent(_city, _sim);
+        middleVBox.AddChild(granaryComp);
+
         // Divider
         mainVBox.AddChild(new HSeparator());
 

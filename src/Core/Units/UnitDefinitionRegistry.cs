@@ -475,6 +475,11 @@ public static class UnitDefinitionRegistry
             operationalRange: 4, bombardStrength: 30,
             description: "Tactical nuclear weapon causing cataclysmic area destruction and radiation fallout."));
 
+        Register(new(UnitType.ICBM, "ICBM", TechEra.Modern, 0, 0, 1f, 500,
+            requiredTechId: "space_flight", requiredResourceIds: new[] { "uranium", "aluminum" }, domain: UnitDomain.Air,
+            operationalRange: 999, bombardStrength: 999,
+            description: "Intercontinental Ballistic Missile. Infinite range, city-destroying power."));
+
         // ═══════════════════════════════════════════════════════
         // GREAT LEADERS & ARMIES
         // ═══════════════════════════════════════════════════════

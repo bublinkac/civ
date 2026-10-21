@@ -18,6 +18,13 @@ public class GameSetupOptions
     public string Temperature { get; set; } = "Temperate";   // "Warm", "Temperate", "Cold", "random"
     public DifficultyLevel Difficulty { get; set; } = DifficultyLevel.Regent;  // Default: balanced (classic Civ3)
 
+    // Multiplayer parameters
+    public GameMode Mode { get; set; } = GameMode.SinglePlayer;
+    public string Player1Name { get; set; } = "Player 1";
+    public string Player2Name { get; set; } = "Player 2";
+    public string ServerIp { get; set; } = "127.0.0.1";
+    public int ServerPort { get; set; } = 7777;
+
     /// <summary>
     /// Returns a resolved copy of options where all "random" selections are replaced with concrete values.
     /// </summary>
@@ -34,7 +41,12 @@ public class GameSetupOptions
             GeologicalAge = GeologicalAge,
             Climate = Climate,
             Temperature = Temperature,
-            Difficulty = Difficulty
+            Difficulty = Difficulty,
+            Mode = Mode,
+            Player1Name = Player1Name,
+            Player2Name = Player2Name,
+            ServerIp = ServerIp,
+            ServerPort = ServerPort
         };
 
         var rand = new Random(Seed);

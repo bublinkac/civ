@@ -19,6 +19,14 @@ public partial class MainMenu : CanvasLayer
     /// <summary>Fired when the player chooses to load an existing save.</summary>
     public event Action? OnLoadGame;
 
+    /// <summary>Fired when the player chooses to start a Hotseat multiplayer game.</summary>
+    public event Action<GameSetupOptions>? OnStartHotseatGame;
+
+    /// <summary>Fired when the player chooses to start a Network multiplayer game.</summary>
+    public event Action<GameSetupOptions>? OnStartNetworkGame;
+
+    private MultiplayerMenu? _multiplayerMenu;
+
     // Map size definitions matching Civilization 3
     private static readonly MapSizeOption[] MapSizes = new[]
     {
@@ -170,7 +178,7 @@ public partial class MainMenu : CanvasLayer
         AddClassicMenuButton(menuVBox, "Civ-Content", false, null);
         AddClassicMenuButton(menuVBox, "Hall of Fame", false, null);
         AddClassicMenuButton(menuVBox, "Preferences", false, null);
-        AddClassicMenuButton(menuVBox, "Multiplayer", false, null);
+        AddClassicMenuButton(menuVBox, "Multiplayer", true, OnMultiplayerClicked);
         AddClassicMenuButton(menuVBox, "Credits", false, null);
         AddClassicMenuButton(menuVBox, "Exit", true, OnExitClicked);
 
@@ -683,6 +691,31 @@ public partial class MainMenu : CanvasLayer
     private void OnExitClicked()
     {
         GetTree().Quit();
+    }
+
+    private void OnMultiplayerClicked()
+    {
+        if (GodotObject.IsInstanceValid(_multiplayerMenu))
+        {
+            _multiplayerMenu.QueueFree();
+        }
+
+        _multiplayerMenu = new MultiplayerMenu();
+        _multiplayerMenu.OnStartHotseatGame += (opt) =>
+        {
+            _multiplayerMenu = null;
+            OnStartHotseatGame?.Invoke(opt);
+        };
+        _multiplayerMenu.OnStartNetworkGame += (opt) =>
+        {
+            _multiplayerMenu = null;
+            OnStartNetworkGame?.Invoke(opt);
+        };
+        _multiplayerMenu.OnBackToTitle += () =>
+        {
+            _multiplayerMenu = null;
+        };
+        AddChild(_multiplayerMenu);
     }
 
     private void OnStartPressed()

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace CivGame.Core.Pathfinding;
@@ -40,14 +41,28 @@ public class Pathfinder
     {
         if (unit == null) return null;
         if (!_map.IsInBounds(startX, startY) || !_map.IsInBounds(targetX, targetY)) return null;
+        startX = _map.NormalizeX(startX);
+        targetX = _map.NormalizeX(targetX);
         if (startX == targetX && startY == targetY)
         {
             return new List<(int, int)> { (startX, startY) };
         }
 
-        // Target tile validation (land units cannot enter ocean)
+        // Target tile validation
         var targetTile = _map.GetTile(targetX, targetY);
-        if (targetTile == null || targetTile.IsOcean) return null;
+        if (targetTile == null) return null;
+
+        if (unit.IsNavalUnit)
+        {
+            // Naval units can only traverse water or friendly coastal ports
+            bool isFriendlyPort = _sim.Cities.Any(c => c.X == targetX && c.Y == targetY && c.Faction == unit.Faction && c.IsCoastal(_map));
+            if (!targetTile.IsOcean && !isFriendlyPort) return null;
+        }
+        else
+        {
+            // Land units cannot enter ocean
+            if (targetTile.IsOcean) return null;
+        }
 
         // Reset search states for the search space (only reset the touched elements if possible, 
         // but for safety and fast flat arrays, resetting arrays is extremely fast in C#)
@@ -95,7 +110,7 @@ public class Pathfinder
             // Explore 8-way neighbors
             for (int i = 0; i < 8; i++)
             {
-                int nx = cx + dxs[i];
+                int nx = _map.NormalizeX(cx + dxs[i]);
                 int ny = cy + dys[i];
 
                 if (!_map.IsInBounds(nx, ny)) continue;
@@ -104,7 +119,17 @@ public class Pathfinder
                 if (_closedSet[neighborIndex]) continue;
 
                 var neighborTile = _map.GetTile(nx, ny);
-                if (neighborTile == null || neighborTile.IsOcean) continue;
+                if (neighborTile == null) continue;
+
+                if (unit.IsNavalUnit)
+                {
+                    bool isFriendlyPort = _sim.Cities.Any(c => c.X == nx && c.Y == ny && c.Faction == unit.Faction && c.IsCoastal(_map));
+                    if (!neighborTile.IsOcean && !isFriendlyPort) continue;
+                }
+                else
+                {
+                    if (neighborTile.IsOcean) continue;
+                }
 
                 // Friendly and Hostile units check (except target tile which we can select to attack)
                 if (!ignoreUnits && (nx != targetX || ny != targetY))
@@ -179,22 +204,12 @@ public class Pathfinder
 
     private int ToIndex(int x, int y)
     {
-        return y * _width + x;
+        return y * _width + _map.NormalizeX(x);
     }
 
     private float Heuristic(int x1, int y1, int x2, int y2, float maxMovement)
     {
-        // Chebyshev distance (since 8-way movement is allowed)
-        int dx = Math.Abs(x1 - x2);
-        int dy = Math.Abs(y1 - y2);
-        int dist = Math.Max(dx, dy);
-
-        // Min movement cost is 0.0f (railroads) or 0.333f (roads) or 1.0f (plains/grasslands).
-        // Using 0.0f makes it equivalent to Dijkstra's algorithm (always admissible, finding absolute shortest path).
-        // However, to make it super fast while still perfectly correct, we can assume a minimum cost of 0.0f.
-        // Actually, let's look at if we can use a small cost. If we use 0.0f, Heuristic is 0, which is perfectly safe.
-        // Let's use a very conservative estimate of 0.0f to guarantee mathematical perfection with zero risk of overestimation.
-        // Since Dijkstra on a flat array with our MinHeap is extremely fast anyway, it runs in a fraction of a millisecond.
+        int dist = _map.GetChebyshevDistance(x1, y1, x2, y2);
         return dist * 0.0f;
     }
 }

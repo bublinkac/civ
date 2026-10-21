@@ -7,8 +7,15 @@ using CivGame.Core.Diplomacy;
 
 namespace CivGame.Core;
 
+public enum CityCaptureChoice
+{
+    Keep,
+    Raze
+}
+
 public class GameSimulation
     {
+        public event Action<City, Unit>? OnCityCapturePrompt;
         public GameMap Map { get; }
         private Pathfinder _pathfinder;
         public Pathfinder Pathfinder => _pathfinder ??= new Pathfinder(Map, this);
@@ -21,11 +28,53 @@ public class GameSimulation
         public List<Unit> Units { get; } = new();
         public List<City> Cities { get; } = new();
         public FogState[,] VisibilityGrid { get; }
+        public FogState[,] Player2VisibilityGrid { get; }
         public int TurnNumber { get; private set; } = 1;
         public List<(int X, int Y)> BarbarianCamps { get; } = new();
         public List<(int X, int Y)> GoodyHuts { get; } = new();
         public TechManager Research { get; } = new();
+        public TechManager Player2Research { get; } = new();
         public EspionageSystem Espionage { get; private set; }
+
+        // Multiplayer State
+        public GameMode Mode { get; set; } = GameMode.SinglePlayer;
+        public Faction ActiveTurnFaction { get; set; } = Faction.Player;
+        public string Player1Name { get; set; } = "Player 1";
+        public string Player2Name { get; set; } = "Player 2";
+        public int AiTreasury { get; set; } = 0;
+        public int AiTaxRate { get; set; } = 50;
+        public int AiEntertainmentRate { get; set; } = 0;
+
+        public event Action<Faction>? OnHotseatTurnChange;
+
+        public FogState[,] GetVisibilityGrid(Faction faction)
+        {
+            return faction == Faction.AiRival ? Player2VisibilityGrid : VisibilityGrid;
+        }
+
+        public TechManager GetResearch(Faction faction)
+        {
+            return faction == Faction.AiRival ? Player2Research : Research;
+        }
+
+        public int GetTreasury(Faction faction) => faction == Faction.AiRival ? AiTreasury : PlayerTreasury;
+        public void SetTreasury(Faction faction, int val)
+        {
+            if (faction == Faction.AiRival) AiTreasury = val;
+            else PlayerTreasury = val;
+        }
+
+        public int GetTaxRate(Faction faction) => faction == Faction.AiRival ? AiTaxRate : PlayerTaxRate;
+        public int GetEntertainmentRate(Faction faction) => faction == Faction.AiRival ? AiEntertainmentRate : PlayerEntertainmentRate;
+        public GovernmentType GetGovernment(Faction faction) => faction == Faction.AiRival ? AiGovernment : PlayerGovernment;
+        public void SetGovernment(Faction faction, GovernmentType gov)
+        {
+            if (faction == Faction.AiRival) AiGovernment = gov;
+            else PlayerGovernment = gov;
+        }
+
+        public Civilization ActiveCiv => ActiveTurnFaction == Faction.AiRival ? AiCiv : PlayerCiv;
+        public string ActivePlayerName => ActiveTurnFaction == Faction.AiRival ? Player2Name : Player1Name;
         
         private DiplomacyManager _diplomacy;
         public DiplomacyManager Diplomacy => _diplomacy ??= new DiplomacyManager(this);
@@ -58,6 +107,8 @@ public class GameSimulation
         // Economy
         public int PlayerTreasury { get; set; } = 0;
         public int PlayerTaxRate { get; set; } = 50; // 0-100 percentage
+        public int PlayerEntertainmentRate { get; set; } = 0; // 0-100 percentage
+
         public int LastTurnIncome { get; private set; } = 0;
         public int LastTurnMaintenance { get; private set; } = 0;
         public int LastTurnUnitSupport { get; private set; } = 0;
@@ -153,15 +204,18 @@ public class GameSimulation
             Console.WriteLine("[DEBUG] CIV_DEBUG_BUILD=1 — All wonder/building prerequisites ignored!");
 
         Map = map;
+        Map.CalculateContinents();
         VisibilityGrid = new FogState[map.Width, map.Height];
+        Player2VisibilityGrid = new FogState[map.Width, map.Height];
         Espionage = new EspionageSystem(this);
         
-        // Initialize all tiles as completely Unexplored
+        // Initialize all tiles as completely Unexplored for both factions
         for (int x = 0; x < map.Width; x++)
         {
             for (int y = 0; y < map.Height; y++)
             {
                 VisibilityGrid[x, y] = FogState.Unexplored;
+                Player2VisibilityGrid[x, y] = FogState.Unexplored;
             }
         }
 
@@ -188,7 +242,7 @@ public class GameSimulation
             int rx = rand.Next(2, Map.Width - 2);
             int ry = rand.Next(2, Map.Height - 2);
 
-            int distFromCenter = Math.Max(Math.Abs(rx - centerX), Math.Abs(ry - centerY));
+            int distFromCenter = Map.GetChebyshevDistance(rx, ry, centerX, centerY);
             if (distFromCenter < 5) continue; // Keep clear of immediate starting area
 
             var tile = Map.GetTile(rx, ry);
@@ -219,7 +273,7 @@ public class GameSimulation
             int rx = rand.Next(2, Map.Width - 2);
             int ry = rand.Next(2, Map.Height - 2);
 
-            int distFromCenter = Math.Max(Math.Abs(rx - centerX), Math.Abs(ry - centerY));
+            int distFromCenter = Map.GetChebyshevDistance(rx, ry, centerX, centerY);
             if (distFromCenter < 8) continue; // Keep clear of starting area
 
             var tile = Map.GetTile(rx, ry);
@@ -367,16 +421,16 @@ public class GameSimulation
         int aiStartY = Map.Height - py;
 
         // If the calculated position is too close to the player (e.g. because px/py is in the exact center), offset it!
-        int distance = Math.Abs(aiStartX - px) + Math.Abs(aiStartY - py);
+        int distance = Map.GetManhattanDistance(aiStartX, aiStartY, px, py);
         if (distance < Map.Width / 3)
         {
             // Shift AI starting search position to another quadrant
-            aiStartX = (px + Map.Width / 3) % Map.Width;
+            aiStartX = Map.NormalizeX(px + Map.Width / 3);
             aiStartY = (py + Map.Height / 3) % Map.Height;
         }
 
         // Ensure within reasonable bounds
-        aiStartX = Math.Clamp(aiStartX, 2, Map.Width - 3);
+        aiStartX = Map.NormalizeX(aiStartX);
         aiStartY = Math.Clamp(aiStartY, 2, Map.Height - 3);
 
         bool foundLand = false;
@@ -387,7 +441,7 @@ public class GameSimulation
             {
                 for (int dy = -r; dy <= r && !foundLand; dy++)
                 {
-                    int tx = aiStartX + dx;
+                    int tx = Map.NormalizeX(aiStartX + dx);
                     int ty = aiStartY + dy;
                     if (Map.IsInBounds(tx, ty))
                     {
@@ -426,7 +480,7 @@ public class GameSimulation
             foreach (int dy in new[] { 1, -1, 0 })
             {
                 if (foundSettlerLand) break;
-                int tx = aiStartX + dx;
+                int tx = Map.NormalizeX(aiStartX + dx);
                 int ty = aiStartY + dy;
                 if (Map.IsInBounds(tx, ty) && (tx != aiStartX || ty != aiStartY))
                 {
@@ -461,7 +515,7 @@ public class GameSimulation
 
     public void UpdateVisibility()
     {
-        // 1. Shroud currently visible areas (representing memory of explored tiles)
+        // 1. Shroud currently visible areas for both player 1 and player 2
         for (int x = 0; x < Map.Width; x++)
         {
             for (int y = 0; y < Map.Height; y++)
@@ -470,13 +524,20 @@ public class GameSimulation
                 {
                     VisibilityGrid[x, y] = FogState.Shrouded;
                 }
+                if (Player2VisibilityGrid != null && Player2VisibilityGrid[x, y] == FogState.Visible)
+                {
+                    Player2VisibilityGrid[x, y] = FogState.Shrouded;
+                }
             }
         }
 
-        // 2. Apply active vision around player units only
+        // 2. Apply active vision around units for their respective faction
         foreach (var unit in Units)
         {
-            if (unit.Faction != Faction.Player) continue;
+            if (unit.Faction != Faction.Player && unit.Faction != Faction.AiRival) continue;
+            var targetGrid = unit.Faction == Faction.Player ? VisibilityGrid : Player2VisibilityGrid;
+            if (targetGrid == null) continue;
+
             int r = unit.VisionRange;
             var tile = Map.GetTile(unit.X, unit.Y);
             if (tile != null && tile.Improvement != null && tile.Improvement.Id == "outpost")
@@ -488,30 +549,33 @@ public class GameSimulation
             {
                 for (int dy = -r; dy <= r; dy++)
                 {
-                    int tx = unit.X + dx;
+                    int tx = Map.NormalizeX(unit.X + dx);
                     int ty = unit.Y + dy;
-                    if (Map.IsInBounds(tx, ty))
+                    if (ty >= 0 && ty < Map.Height)
                     {
-                        VisibilityGrid[tx, ty] = FogState.Visible;
+                        targetGrid[tx, ty] = FogState.Visible;
                     }
                 }
             }
         }
 
-        // 3. Apply active vision around player cities only
+        // 3. Apply active vision around cities for their respective faction
         foreach (var city in Cities)
         {
-            if (city.Faction != Faction.Player) continue;
+            if (city.Faction != Faction.Player && city.Faction != Faction.AiRival) continue;
+            var targetGrid = city.Faction == Faction.Player ? VisibilityGrid : Player2VisibilityGrid;
+            if (targetGrid == null) continue;
+
             int r = city.VisionRange;
             for (int dx = -r; dx <= r; dx++)
             {
                 for (int dy = -r; dy <= r; dy++)
                 {
-                    int tx = city.X + dx;
+                    int tx = Map.NormalizeX(city.X + dx);
                     int ty = city.Y + dy;
-                    if (Map.IsInBounds(tx, ty))
+                    if (ty >= 0 && ty < Map.Height)
                     {
-                        VisibilityGrid[tx, ty] = FogState.Visible;
+                        targetGrid[tx, ty] = FogState.Visible;
                     }
                 }
             }
@@ -584,7 +648,7 @@ public class GameSimulation
             {
                 for (int dy = -radius; dy <= radius; dy++)
                 {
-                    int tx = city.X + dx;
+                    int tx = Map.NormalizeX(city.X + dx);
                     int ty = city.Y + dy;
                     if (Map.IsInBounds(tx, ty))
                     {
@@ -597,7 +661,7 @@ public class GameSimulation
                                 continue;
                             }
                             
-                            int dist = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                            int dist = Map.GetChebyshevDistance(city.X, city.Y, tx, ty);
                             int influence = city.AccumulatedCulture / Math.Max(1, dist);
                             if (influence == 0) influence = 1; // base 1 influence for newly founded cities
 
@@ -650,7 +714,7 @@ public class GameSimulation
             {
                 if (otherCity.Faction == city.Faction) continue;
 
-                int dist = Math.Max(Math.Abs(city.X - otherCity.X), Math.Abs(city.Y - otherCity.Y));
+                int dist = Map.GetChebyshevDistance(city.X, city.Y, otherCity.X, otherCity.Y);
                 
                 int radius = 1;
                 if (otherCity.AccumulatedCulture >= 10000) radius = 5;
@@ -726,6 +790,179 @@ public class GameSimulation
         else
         {
             return CompletedWonderIds.Contains(wonderId);
+        }
+    }
+
+    public bool DoesFactionControlWonder(Faction faction, string wonderId)
+    {
+        Wonder? wonder = WonderRegistry.Get(wonderId);
+        if (wonder == null) return false;
+
+        if (wonder.IsNationalWonder)
+        {
+            return GetCompletedSmallWonders(faction).Contains(wonderId);
+        }
+        else
+        {
+            return Cities.Any(c => c.Faction == faction && c.Buildings.Any(b => b.Id == wonderId));
+        }
+    }
+
+    /// <summary>
+    /// Checks if a city receives clean Hydro Plant power from Hoover Dam on the same continent.
+    /// </summary>
+    public bool IsCityPoweredByHooverDam(City city)
+    {
+        if (!DoesFactionControlWonder(city.Faction, "hoover_dam")) return false;
+
+        var hooverCity = Cities.FirstOrDefault(c => c.Faction == city.Faction && c.Buildings.Any(b => b.Id == "hoover_dam"));
+        if (hooverCity == null) return false;
+
+        return Map.AreOnSameContinent(city.X, city.Y, hooverCity.X, hooverCity.Y);
+    }
+
+    /// <summary>
+    /// Civ3 Magellan's Voyage: all naval units of the owner receive +2 Movement.
+    /// </summary>
+    public void UpdateUnitMovementBonuses()
+    {
+        bool playerHasMagellan = DoesFactionControlWonder(Faction.Player, "magellans_voyage");
+        bool aiHasMagellan = DoesFactionControlWonder(Faction.AiRival, "magellans_voyage");
+
+        foreach (var unit in Units)
+        {
+            if (unit.IsNavalUnit)
+            {
+                bool hasMagellan = unit.Faction == Faction.Player ? playerHasMagellan : (unit.Faction == Faction.AiRival && aiHasMagellan);
+                float prevBonus = unit.MovementBonus;
+                unit.MovementBonus = hasMagellan ? 2.0f : 0.0f;
+                if (unit.MovementBonus > prevBonus)
+                {
+                    unit.RemainingMovement += (unit.MovementBonus - prevBonus);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Civ3 Theory of Evolution: grants free scientific advances immediately upon completion.
+    /// </summary>
+    public List<string> GrantFreeTechnologies(Faction faction, int count)
+    {
+        var grantedTechs = new List<string>();
+
+        for (int i = 0; i < count; i++)
+        {
+            Technology? candidate = null;
+
+            if (faction == Faction.Player)
+            {
+                // Check if current active research can be completed
+                if (Research.CurrentResearch != null && !Research.IsResearched(Research.CurrentResearch.Id))
+                {
+                    candidate = Research.CurrentResearch;
+                }
+
+                // Otherwise pick earliest unresearched tech with prerequisites met
+                if (candidate == null || grantedTechs.Contains(candidate.Id))
+                {
+                    candidate = Research.AllTechnologies
+                        .Where(t => !Research.IsResearched(t.Id) && !grantedTechs.Contains(t.Id))
+                        .Where(t => t.PrerequisiteIds.All(p => Research.IsResearched(p) || grantedTechs.Contains(p)))
+                        .OrderBy(t => t.Era)
+                        .ThenBy(t => t.ScienceCost)
+                        .FirstOrDefault();
+                }
+
+                if (candidate != null)
+                {
+                    Research.ResearchedTechIds.Add(candidate.Id);
+                    candidate.OnUnlocked(this);
+                    grantedTechs.Add(candidate.Id);
+                    if (Research.CurrentResearch?.Id == candidate.Id)
+                    {
+                        Research.SetResearch(null);
+                    }
+                    Console.WriteLine($"[Theory of Evolution] Player discovered free advance: {candidate.Name}!");
+                }
+            }
+            else if (faction == Faction.AiRival)
+            {
+                if (!string.IsNullOrEmpty(AiCurrentResearchId) && !AiResearchedTechs.Contains(AiCurrentResearchId))
+                {
+                    candidate = Research.AllTechnologies.FirstOrDefault(t => t.Id == AiCurrentResearchId);
+                }
+
+                if (candidate == null || grantedTechs.Contains(candidate.Id))
+                {
+                    candidate = Research.AllTechnologies
+                        .Where(t => !AiResearchedTechs.Contains(t.Id) && !grantedTechs.Contains(t.Id))
+                        .Where(t => t.PrerequisiteIds.All(p => AiResearchedTechs.Contains(p) || grantedTechs.Contains(p)))
+                        .OrderBy(t => t.Era)
+                        .ThenBy(t => t.ScienceCost)
+                        .FirstOrDefault();
+                }
+
+                if (candidate != null)
+                {
+                    AiResearchedTechs.Add(candidate.Id);
+                    grantedTechs.Add(candidate.Id);
+                    if (AiCurrentResearchId == candidate.Id)
+                    {
+                        AiCurrentResearchId = null;
+                        AiScienceProgress = 0;
+                    }
+                    Console.WriteLine($"[Theory of Evolution] AI Rival discovered free advance: {candidate.Name}!");
+                }
+            }
+        }
+
+        return grantedTechs;
+    }
+
+    /// <summary>
+    /// Civ3 Great Library: grants all technologies known by rival civilizations until Education is discovered.
+    /// </summary>
+    public void ApplyGreatLibraryCatchup(Faction? specificFaction = null)
+    {
+        // 1. Check Player
+        if (specificFaction == null || specificFaction == Faction.Player)
+        {
+            if (DoesFactionControlWonder(Faction.Player, "great_library") && !Research.IsResearched("education"))
+            {
+                var techsToLearn = AiResearchedTechs.Where(t => !Research.IsResearched(t)).ToList();
+                foreach (var techId in techsToLearn)
+                {
+                    Research.ResearchedTechIds.Add(techId);
+                    var tech = Research.AllTechnologies.FirstOrDefault(t => t.Id == techId);
+                    tech?.OnUnlocked(this);
+                    Console.WriteLine($"[The Great Library] Player acquired {tech?.Name ?? techId} through ancient scrolls!");
+                    if (Research.CurrentResearch?.Id == techId)
+                    {
+                        Research.SetResearch(null);
+                    }
+                }
+            }
+        }
+
+        // 2. Check AI Rival
+        if (specificFaction == null || specificFaction == Faction.AiRival)
+        {
+            if (DoesFactionControlWonder(Faction.AiRival, "great_library") && !AiResearchedTechs.Contains("education"))
+            {
+                var techsToLearn = Research.ResearchedTechIds.Where(t => !AiResearchedTechs.Contains(t)).ToList();
+                foreach (var techId in techsToLearn)
+                {
+                    AiResearchedTechs.Add(techId);
+                    var tech = Research.AllTechnologies.FirstOrDefault(t => t.Id == techId);
+                    Console.WriteLine($"[The Great Library] AI Rival acquired {tech?.Name ?? techId} through ancient scrolls!");
+                    if (AiCurrentResearchId == techId)
+                    {
+                        AiCurrentResearchId = null;
+                        AiScienceProgress = 0;
+                    }
+                }
+            }
         }
     }
 
@@ -807,9 +1044,10 @@ public class GameSimulation
     public MoveValidationResult ValidateUnitMove(Unit unit, int targetX, int targetY)
     {
         if (!Map.IsInBounds(targetX, targetY)) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetOutOfBounds);
+        targetX = Map.NormalizeX(targetX);
 
         // Check if movement destination is adjacent (Chebyshev distance of 1)
-        int dx = Math.Abs(targetX - unit.X);
+        int dx = Map.GetDeltaX(targetX, unit.X);
         int dy = Math.Abs(targetY - unit.Y);
         if (dx > 1 || dy > 1 || (dx == 0 && dy == 0)) return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetNotAdjacent);
 
@@ -841,7 +1079,7 @@ public class GameSimulation
         {
             if (tile.IsOcean)
             {
-                bool canBoard = Units.Any(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+                bool canBoard = Units.Any(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit, this));
                 if (!canBoard)
                 {
                     return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
@@ -871,6 +1109,7 @@ public class GameSimulation
     public bool MoveUnit(Unit unit, int targetX, int targetY)
     {
         if (!ValidateUnitMove(unit, targetX, targetY).IsValid) return false;
+        targetX = Map.NormalizeX(targetX);
 
         unit.IsFortified = false;
         unit.IsSentry = false;
@@ -880,10 +1119,10 @@ public class GameSimulation
         // Check if land unit is boarding a friendly transport in water
         if (unit.Domain == UnitDomain.Land && tile.IsOcean)
         {
-            var transport = Units.Find(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+            var transport = Units.Find(u => u.X == targetX && u.Y == targetY && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit, this));
             if (transport != null)
             {
-                unit.BoardTransport(transport);
+                unit.BoardTransport(transport, this);
                 unit.RemainingMovement = 0;
                 Console.WriteLine($"[Transport] {unit.Type} boarded {transport.Type} at ({targetX}, {targetY})!");
                 UpdateVisibility();
@@ -929,6 +1168,9 @@ public class GameSimulation
             }
         }
 
+        // ZOC (Zone of Control) check
+        CheckZoneOfControl(unit, unit.X, unit.Y, targetX, targetY);
+
         // Normal movement
         float moveCost = GetTileMovementCostForUnit(tile, unit);
         unit.MoveTo(targetX, targetY, moveCost);
@@ -954,6 +1196,55 @@ public class GameSimulation
 
         CheckGameEndConditions();
         return true;
+    }
+
+    private void CheckZoneOfControl(Unit movingUnit, int fromX, int fromY, int toX, int toY)
+    {
+        fromX = Map.NormalizeX(fromX);
+        toX = Map.NormalizeX(toX);
+
+        var hostileZocUnits = Units.Where(u =>
+            u.TransportUnitId == null &&
+            u.Health > 0 &&
+            IsHostile(movingUnit, u) &&
+            HasZoneOfControl(u) &&
+            Map.GetChebyshevDistance(u.X, u.Y, fromX, fromY) <= 1 &&
+            Map.GetChebyshevDistance(u.X, u.Y, toX, toY) <= 1 &&
+            !(u.X == fromX && u.Y == fromY) && !(u.X == toX && u.Y == toY)
+        ).ToList();
+
+        foreach (var zocUnit in hostileZocUnits)
+        {
+            Console.WriteLine($"[ZOC] {zocUnit.Type} exerts Zone of Control on {movingUnit.Type}!");
+            
+            float hitChance = (float)zocUnit.AttackStrength / (zocUnit.AttackStrength + Math.Max(1.0f, movingUnit.DefenseStrength));
+            hitChance = Math.Clamp(hitChance, 0.2f, 0.8f);
+
+            if (Random.Shared.NextDouble() < hitChance)
+            {
+                int dmg = 20; // 1 HP = 20 Health in this engine
+                movingUnit.Health -= dmg;
+                Console.WriteLine($"[ZOC] {zocUnit.Type} hits {movingUnit.Type} for {dmg} damage! Remaining HP: {movingUnit.Health}");
+
+                // ZOC usually cannot kill, leaves at 1 HP
+                if (movingUnit.Health <= 0)
+                {
+                    movingUnit.Health = 1;
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[ZOC] {zocUnit.Type} fired but missed!");
+            }
+        }
+    }
+
+    private bool HasZoneOfControl(Unit u)
+    {
+        if (u.Domain != UnitDomain.Land) return false;
+        if (u.MaxMovement > 1) return true;
+        if (u.Type == UnitType.Infantry || u.Type == UnitType.MechInfantry || u.Type == UnitType.TOWInfantry) return true;
+        return false;
     }
 
     private void ExploreGoodyHut(Unit unit, int x, int y)
@@ -992,9 +1283,9 @@ public class GameSimulation
             {
                 for (int dy = -revealRadius; dy <= revealRadius; dy++)
                 {
-                    int nx = x + dx;
+                    int nx = Map.NormalizeX(x + dx);
                     int ny = y + dy;
-                    if (nx >= 0 && nx < Map.Width && ny >= 0 && ny < Map.Height)
+                    if (ny >= 0 && ny < Map.Height)
                     {
                         if (Math.Abs(dx) + Math.Abs(dy) <= revealRadius * 1.5)
                         {
@@ -1023,6 +1314,7 @@ public class GameSimulation
     {
         if (a.Faction == b.Faction) return false;
         if (a.Faction == Faction.Barbarian || b.Faction == Faction.Barbarian) return true;
+        if (a.HasHiddenNationality || b.HasHiddenNationality) return true;
 
         // Player vs. AI Rival
         if ((a.Faction == Faction.Player && b.Faction == Faction.AiRival) ||
@@ -1050,6 +1342,8 @@ public class GameSimulation
 
     private void CheckTerritoryIntrusion(Unit unit, int targetX, int targetY)
     {
+        if (unit.HasHiddenNationality) return;
+
         var tile = Map.GetTile(targetX, targetY);
         if (tile == null || string.IsNullOrEmpty(tile.OwnerCityId)) return;
 
@@ -1074,7 +1368,24 @@ public class GameSimulation
 
     public void ResolveCombat(Unit attacker, Unit defender)
     {
-        Console.WriteLine($"[Combat] {attacker.Type} (HP: {attacker.Health}) attacks {defender.Type} (HP: {defender.Health}) at ({defender.Y}, {defender.Y})!");
+        Console.WriteLine($"[Combat] {attacker.Type} (HP: {attacker.Health}) attacks {defender.Type} (HP: {defender.Health}) at ({defender.X}, {defender.Y})!");
+
+        // Defensive Bombardment
+        // Find units on the same tile as defender that have bombard strength (and haven't defended yet, but we'll just let all artillery do it once per combat).
+        var bombardiers = Units.Where(u => u.Faction == defender.Faction && u.X == defender.X && u.Y == defender.Y && u.BombardStrength > 0 && u.Id != defender.Id).ToList();
+        foreach (var bombardier in bombardiers)
+        {
+            if (attacker.Health <= 1) break;
+            
+            float defBombardStr = bombardier.BombardStrength;
+            float attDefStr = Math.Max(1f, attacker.DefenseStrength);
+            if (Random.Shared.NextDouble() < (defBombardStr / (defBombardStr + attDefStr)))
+            {
+                int dmg = Math.Clamp((int)(15f * defBombardStr / attDefStr), 5, 25);
+                attacker.Health = Math.Max(1, attacker.Health - dmg);
+                Console.WriteLine($"[Defensive Bombardment] {bombardier.Type} fired a defensive shot at {attacker.Type} for {dmg} damage! Attacker HP: {attacker.Health}");
+            }
+        }
 
         // 1. Calculate Damage to Defender (based on attack and defense ratio)
         float attStrength = Math.Max(0.5f, attacker.AttackStrength);
@@ -1141,13 +1452,7 @@ public class GameSimulation
             }
         }
 
-        // The Pentagon effect: Defender gets +25% defense strength globally if their faction completed it
-        bool defenderHasPentagon = Cities.Any(c => c.Faction == defender.Faction && c.Buildings.Any(b => b.Id == "pentagon"));
-        if (defenderHasPentagon)
-        {
-            defStrength *= 1.25f;
-            Console.WriteLine($"[The Pentagon] {defender.Faction}'s {defender.Type} receives +25% defense bonus!");
-        }
+
 
         int damageToDefender = Math.Max(12, (int)(28.0f * (attStrength / defStrength)));
         defender.Health = Math.Max(0, defender.Health - damageToDefender);
@@ -1163,6 +1468,13 @@ public class GameSimulation
         }
 
         // 3. Resolve Deaths and Advances
+        // Retreat logic for fast units (Civ3)
+        if (attacker.Health <= 0 && attacker.MaxMovement > 1 && defender.MaxMovement <= 1 && defender.Health > 0)
+        {
+            attacker.Health = 1;
+            Console.WriteLine($"[Combat] {attacker.Type} retreats from combat with 1 HP remaining!");
+        }
+
         bool defenderDied = defender.Health <= 0;
         bool attackerDied = attacker.Health <= 0;
 
@@ -1342,12 +1654,11 @@ public class GameSimulation
 
     public bool LoadUnitIntoTransport(Unit cargo, Unit transport)
     {
-        if (!cargo.CanBoardTransport(transport)) return false;
-        int dx = Math.Abs(cargo.X - transport.X);
-        int dy = Math.Abs(cargo.Y - transport.Y);
-        if (dx > 1 || dy > 1) return false;
+        if (!cargo.CanBoardTransport(transport, this)) return false;
+        int dist = Map.GetChebyshevDistance(cargo.X, cargo.Y, transport.X, transport.Y);
+        if (dist > 1) return false;
 
-        cargo.BoardTransport(transport);
+        cargo.BoardTransport(transport, this);
         cargo.RemainingMovement = 0;
         UpdateVisibility();
         return true;
@@ -1360,14 +1671,14 @@ public class GameSimulation
         if (transport == null) return false;
 
         if (!Map.IsInBounds(targetX, targetY)) return false;
-        int dx = Math.Abs(targetX - transport.X);
-        int dy = Math.Abs(targetY - transport.Y);
-        if (dx > 1 || dy > 1) return false;
+        targetX = Map.NormalizeX(targetX);
+        int dist = Map.GetChebyshevDistance(targetX, targetY, transport.X, transport.Y);
+        if (dist > 1) return false;
 
         var targetTile = Map.GetTile(targetX, targetY);
         if (targetTile == null || !targetTile.IsLand) return false;
 
-        cargo.Disembark(targetX, targetY);
+        cargo.Disembark(targetX, targetY, transport);
         cargo.RemainingMovement = 0;
         UpdateVisibility();
         return true;
@@ -1429,14 +1740,17 @@ public class GameSimulation
     {
         if (unit.BombardRange <= 0 || !unit.HasMovementRemaining()) return false;
         if (!Map.IsInBounds(targetX, targetY)) return false;
+        targetX = Map.NormalizeX(targetX);
 
-        int dist = Math.Max(Math.Abs(targetX - unit.X), Math.Abs(targetY - unit.Y));
+        int dist = Map.GetChebyshevDistance(targetX, targetY, unit.X, unit.Y);
         if (dist > unit.BombardRange || dist == 0) return false;
 
         var targets = Units.Where(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && IsHostile(unit, u)).ToList();
         var enemyCity = Cities.Find(c => c.X == targetX && c.Y == targetY && c.Faction != unit.Faction && IsHostileToFaction(unit.Faction, c.Faction));
+        var targetTile = Map.GetTile(targetX, targetY);
 
-        if (targets.Count == 0 && enemyCity == null) return false;
+        if (targets.Count == 0 && enemyCity == null && (targetTile == null || (!targetTile.HasRoad && !targetTile.HasRailroad && targetTile.Improvement == null)))
+            return false;
 
         unit.RemainingMovement = 0;
 
@@ -1493,6 +1807,24 @@ public class GameSimulation
                 }
             }
         }
+        else if (targetTile != null)
+        {
+            if (targetTile.Improvement != null)
+            {
+                Console.WriteLine($"[Bombard] {unit.Type} destroyed {targetTile.Improvement.Name} at ({targetX}, {targetY})!");
+                targetTile.Improvement = null;
+            }
+            else if (targetTile.HasRailroad)
+            {
+                Console.WriteLine($"[Bombard] {unit.Type} damaged railroad at ({targetX}, {targetY}) to road!");
+                targetTile.HasRailroad = false;
+            }
+            else if (targetTile.HasRoad)
+            {
+                Console.WriteLine($"[Bombard] {unit.Type} destroyed road at ({targetX}, {targetY})!");
+                targetTile.HasRoad = false;
+            }
+        }
 
         UpdateVisibility();
         return true;
@@ -1501,7 +1833,8 @@ public class GameSimulation
     public bool ExecuteAirRebase(Unit airUnit, int targetX, int targetY)
     {
         if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
-        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        targetX = Map.NormalizeX(targetX);
+        int dist = Map.GetChebyshevDistance(targetX, targetY, airUnit.X, airUnit.Y);
         if (dist > airUnit.OperationalRange * 2) return false;
 
         bool validBase = Cities.Any(c => c.X == targetX && c.Y == targetY && c.Faction == airUnit.Faction);
@@ -1526,7 +1859,8 @@ public class GameSimulation
     public bool ExecuteAirRecon(Unit airUnit, int targetX, int targetY)
     {
         if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
-        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        targetX = Map.NormalizeX(targetX);
+        int dist = Map.GetChebyshevDistance(targetX, targetY, airUnit.X, airUnit.Y);
         if (dist > airUnit.OperationalRange) return false;
 
         int reconRadius = 2;
@@ -1534,9 +1868,9 @@ public class GameSimulation
         {
             for (int dy = -reconRadius; dy <= reconRadius; dy++)
             {
-                int tx = targetX + dx;
+                int tx = Map.NormalizeX(targetX + dx);
                 int ty = targetY + dy;
-                if (Map.IsInBounds(tx, ty))
+                if (ty >= 0 && ty < Map.Height)
                 {
                     if (airUnit.Faction == Faction.Player)
                     {
@@ -1554,14 +1888,15 @@ public class GameSimulation
     {
         if (airUnit.Domain != UnitDomain.Air || !airUnit.HasMovementRemaining()) return false;
         if (!Map.IsInBounds(targetX, targetY)) return false;
+        targetX = Map.NormalizeX(targetX);
 
-        int dist = Math.Max(Math.Abs(targetX - airUnit.X), Math.Abs(targetY - airUnit.Y));
+        int dist = Map.GetChebyshevDistance(targetX, targetY, airUnit.X, airUnit.Y);
         if (dist > airUnit.OperationalRange || dist == 0) return false;
 
         // Check for interception: is there an enemy interceptor or anti-air unit nearby?
         var interceptor = Units.FirstOrDefault(u => u.TransportUnitId == null && IsHostile(airUnit, u) &&
             (u.Type == UnitType.Fighter || u.Type == UnitType.JetFighter || u.Type == UnitType.F15 || u.Type == UnitType.Flak || u.Type == UnitType.MobileSAM || u.Type == UnitType.AegisCruiser) &&
-            Math.Max(Math.Abs(u.X - targetX), Math.Abs(u.Y - targetY)) <= 2);
+            Map.GetChebyshevDistance(u.X, u.Y, targetX, targetY) <= 2);
 
         if (interceptor != null && !airUnit.IsStealth)
         {
@@ -1590,7 +1925,7 @@ public class GameSimulation
             Console.WriteLine($"[Missile] {airUnit.Type} was expended in strike.");
             DestroyUnit(airUnit);
         }
-        else if (airUnit.Type == UnitType.TacticalNuke)
+        else if (airUnit.Type == UnitType.TacticalNuke || airUnit.Type == UnitType.ICBM)
         {
             Console.WriteLine($"[Nuclear Strike] Tactical Nuke detonated at ({targetX}, {targetY})!");
             for (int dx = -1; dx <= 1; dx++)
@@ -1653,11 +1988,9 @@ public class GameSimulation
     /// Civ3 distance formula: d = max(dx,dy) + min(dx,dy)/2
     /// This gives a value between Manhattan and Chebyshev distance.
     /// </summary>
-    private static int Civ3Distance(City a, City b)
+    private int Civ3Distance(City a, City b)
     {
-        int dx = Math.Abs(a.X - b.X);
-        int dy = Math.Abs(a.Y - b.Y);
-        return Math.Max(dx, dy) + Math.Min(dx, dy) / 2;
+        return Map.GetCiv3Distance(a.X, a.Y, b.X, b.Y);
     }
 
     public bool HasFreshWaterAccess(City city)
@@ -1667,7 +2000,7 @@ public class GameSimulation
         {
             for (int dy = -1; dy <= 1; dy++)
             {
-                int tx = city.X + dx;
+                int tx = Map.NormalizeX(city.X + dx);
                 int ty = city.Y + dy;
                 if (Map.IsInBounds(tx, ty))
                 {
@@ -1700,7 +2033,7 @@ public class GameSimulation
             for (int dy = -1; dy <= 1; dy++)
             {
                 if (dx == 0 && dy == 0) continue; // Skip self
-                int nx = x + dx;
+                int nx = Map.NormalizeX(x + dx);
                 int ny = y + dy;
                 if (!Map.IsInBounds(nx, ny)) continue;
 
@@ -1734,55 +2067,120 @@ public class GameSimulation
         // Check if it's an enemy city
         if (city.Faction != unit.Faction)
         {
-            var oldFaction = city.Faction;
-            bool wasCapital = city.IsCapital;
-
             if (unit.Faction == Faction.Barbarian)
             {
-                Console.WriteLine($"[City Captured] Barbarians have razed the city of {city.Name} at ({x}, {y})!");
-
-                // Reset ownership of tiles owned by this city
-                for (int tx = 0; tx < Map.Width; tx++)
+                ApplyCityCaptureChoice(city, unit, CityCaptureChoice.Raze);
+            }
+            else if (unit.Faction == Faction.Player)
+            {
+                if (OnCityCapturePrompt != null)
                 {
-                    for (int ty = 0; ty < Map.Height; ty++)
-                    {
-                        var t = Map.GetTile(tx, ty);
-                        if (t != null && t.OwnerCityId == city.Id)
-                        {
-                            t.OwnerCityId = null;
-                        }
-                    }
+                    OnCityCapturePrompt.Invoke(city, unit);
                 }
-                Cities.Remove(city);
-
-                if (wasCapital)
+                else
                 {
-                    RelocateCapital(oldFaction);
+                    ApplyCityCaptureChoice(city, unit, CityCaptureChoice.Keep);
                 }
             }
-            else
+            else // AI Rival
             {
-                city.Faction = unit.Faction;
-                city.IsCapital = false; // Captured city is no longer the old faction's capital
-                // Remove Palace from captured city (old faction gets a new one)
-                city.Buildings.RemoveAll(b => b is Palace);
-
-                // Clear city production progress upon capture
-                city.CurrentProject = ProductionProject.None;
-                city.StoredProduction = 0;
-                city.CurrentProductionProgress = 0;
-
-                // Reduce population by 1 (conquest penalty)
-                city.Population = Math.Max(1, city.Population - 1);
-
-                Console.WriteLine($"[City Captured] Faction {unit.Faction} has captured the city of {city.Name} from {oldFaction} at ({x}, {y})!");
-
-                if (wasCapital)
-                {
-                    RelocateCapital(oldFaction);
-                }
+                // AI keeps cities unless it is a tiny pop 1 outpost without wonders and not capital
+                bool shouldRaze = city.Population <= 1 && city.Buildings.Count <= 1 && !city.IsCapital;
+                ApplyCityCaptureChoice(city, unit, shouldRaze ? CityCaptureChoice.Raze : CityCaptureChoice.Keep);
             }
         }
+    }
+
+    public void ApplyCityCaptureChoice(City city, Unit capturingUnit, CityCaptureChoice choice)
+    {
+        if (!Cities.Contains(city)) return;
+
+        var oldFaction = city.Faction;
+        bool wasCapital = city.IsCapital;
+
+        if (choice == CityCaptureChoice.Raze)
+        {
+            Console.WriteLine($"[City Captured] Faction {capturingUnit.Faction} has razed the city of {city.Name} at ({city.X}, {city.Y})!");
+
+            // 1. Reset ownership of tiles owned by this city
+            for (int tx = 0; tx < Map.Width; tx++)
+            {
+                for (int ty = 0; ty < Map.Height; ty++)
+                {
+                    var t = Map.GetTile(tx, ty);
+                    if (t != null && t.OwnerCityId == city.Id)
+                    {
+                        t.OwnerCityId = null;
+                    }
+                }
+            }
+
+            // 2. Spoil of war: plunder treasury
+            int plunderedGold = Math.Min(60, 15 + city.Population * 10);
+            if (capturingUnit.Faction == Faction.Player)
+            {
+                PlayerTreasury += plunderedGold;
+                Console.WriteLine($"[City Razed] Plundered {plunderedGold} gold from the ruins of {city.Name}!");
+            }
+
+            // 3. Civ3 mechanic: Enslave captured citizens into Workers
+            if (capturingUnit.Faction != Faction.Barbarian)
+            {
+                int workersEnslaved = Math.Clamp(city.Population / 2, 1, 2);
+                for (int i = 0; i < workersEnslaved; i++)
+                {
+                    var worker = new Unit(Guid.NewGuid().ToString(), UnitType.Worker, city.X, city.Y, capturingUnit.Faction);
+                    worker.RemainingMovement = 0;
+                    Units.Add(worker);
+                }
+                Console.WriteLine($"[City Razed] {workersEnslaved} captive worker(s) created from the population of {city.Name}!");
+            }
+
+            // 4. Remove city from simulation
+            Cities.Remove(city);
+
+            if (wasCapital)
+            {
+                RelocateCapital(oldFaction);
+            }
+        }
+        else // Keep
+        {
+            city.Faction = capturingUnit.Faction;
+            city.IsCapital = false; // Captured city is no longer the old faction's capital
+            city.Buildings.RemoveAll(b => b is Palace);
+            city.Buildings.RemoveAll(b => b is SmallWonder);
+
+            // Clear city production progress upon capture
+            city.CurrentProject = ProductionProject.None;
+            city.StoredProduction = 0;
+            city.CurrentProductionProgress = 0;
+
+            // Reduce population by 1 (conquest penalty)
+            city.Population = Math.Max(1, city.Population - 1);
+
+            // Resisters / disorder turns in conquered city
+            city.DisorderTurns = Math.Max(1, city.Population / 2);
+
+            // Plunder small amount of gold upon capture
+            int plunderedGold = Math.Min(35, 10 + city.Population * 5);
+            if (capturingUnit.Faction == Faction.Player)
+            {
+                PlayerTreasury += plunderedGold;
+            }
+
+            Console.WriteLine($"[City Captured] Faction {capturingUnit.Faction} has captured the city of {city.Name} from {oldFaction} at ({city.X}, {city.Y})! ({city.DisorderTurns} resistance turns)");
+
+            if (wasCapital)
+            {
+                RelocateCapital(oldFaction);
+            }
+        }
+
+        UpdateUnitMovementBonuses();
+        CalculateCulturalBorders();
+        UpdateVisibility();
+        CheckGameEndConditions();
     }
 
     public void CheckGameEndConditions()
@@ -1974,6 +2372,7 @@ public class GameSimulation
         string aiCivId,
         int playerTreasury,
         int playerTaxRate,
+        int playerEntertainmentRate,
         int lastTurnIncome,
         int lastTurnMaintenance,
         int lastTurnScience,
@@ -1995,6 +2394,7 @@ public class GameSimulation
         AiCivId = aiCivId;
         PlayerTreasury = playerTreasury;
         PlayerTaxRate = playerTaxRate;
+        PlayerEntertainmentRate = playerEntertainmentRate;
         LastTurnIncome = lastTurnIncome;
         LastTurnMaintenance = lastTurnMaintenance;
         LastTurnScience = lastTurnScience;
@@ -2042,7 +2442,18 @@ public class GameSimulation
         {
             var unit = new Unit(dto.Id, dto.Type, dto.X, dto.Y, dto.Faction, dto.CivilizationId);
             unit.RemainingMovement = dto.RemainingMovement;
-            unit.Health = dto.Health;
+            unit.SetExperience(dto.Experience);
+            unit.Health = dto.Health; // preserve exact health after experience initialization
+            unit.IsFortified = dto.IsFortified;
+            unit.IsSleeping = dto.IsSleeping;
+            unit.IsSentry = dto.IsSentry;
+            unit.TransportUnitId = dto.TransportUnitId;
+            unit.HasGeneratedLeader = dto.HasGeneratedLeader;
+            if (dto.LoadedUnitIds != null)
+            {
+                unit.LoadedUnitIds.Clear();
+                unit.LoadedUnitIds.AddRange(dto.LoadedUnitIds);
+            }
             
             if (!string.IsNullOrEmpty(dto.ImprovementName))
             {
@@ -2077,6 +2488,15 @@ public class GameSimulation
             city.AccumulatedCulture = dto.AccumulatedCulture;
             city.CurrentProject = dto.CurrentProject;
             city.CurrentProductionProgress = dto.CurrentProductionProgress;
+            city.DisorderTurns = dto.DisorderTurns;
+            city.IsWLTKD = dto.IsWLTKD;
+
+            if (dto.Specialists != null && dto.Specialists.Count > 0)
+            {
+                city.Specialists.Clear();
+                city.Specialists.AddRange(dto.Specialists);
+            }
+
             if (dto.ProductionQueue != null)
             {
                 city.ProductionQueue.Clear();
@@ -2214,7 +2634,7 @@ public class GameSimulation
 
             for (int i = 0; i < 8; i++)
             {
-                int nx = cx + dxs[i];
+                int nx = Map.NormalizeX(cx + dxs[i]);
                 int ny = cy + dys[i];
 
                 if (!Map.IsInBounds(nx, ny)) continue;
@@ -2231,7 +2651,7 @@ public class GameSimulation
                 {
                     if (tile.IsOcean)
                     {
-                        bool canBoard = Units.Any(u => u.X == nx && u.Y == ny && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit));
+                        bool canBoard = Units.Any(u => u.X == nx && u.Y == ny && u.Faction == unit.Faction && u.Domain == UnitDomain.Sea && u.CanBoardTransport(unit, this));
                         if (!canBoard) continue;
                     }
                 }
@@ -2257,6 +2677,12 @@ public class GameSimulation
 
     public void EndTurn()
     {
+        if (Mode == GameMode.Hotseat)
+        {
+            EndHotseatTurn();
+            return;
+        }
+
         // 1. Process Barbarian action before starting next turn
         ProcessBarbarianTurn();
 
@@ -2266,6 +2692,31 @@ public class GameSimulation
         // 2.5 Process AI Research
         ProcessAiResearch();
 
+        AdvanceWorldTurn();
+    }
+
+    public void EndHotseatTurn()
+    {
+        if (ActiveTurnFaction == Faction.Player)
+        {
+            // End Player 1's turn -> hand over to Player 2
+            ActiveTurnFaction = Faction.AiRival;
+            UpdateVisibility();
+            OnHotseatTurnChange?.Invoke(Faction.AiRival);
+        }
+        else
+        {
+            // Player 2 finished turn -> simulate Barbarians, advance world simulation, cycle to Player 1
+            ProcessBarbarianTurn();
+            AdvanceWorldTurn();
+            ActiveTurnFaction = Faction.Player;
+            UpdateVisibility();
+            OnHotseatTurnChange?.Invoke(Faction.Player);
+        }
+    }
+
+    public void AdvanceWorldTurn()
+    {
         // 3. Advance Worker Construction
         ProcessWorkerConstruction();
 
@@ -2307,15 +2758,20 @@ public class GameSimulation
         TurnNumber++;
         CalculateTradeNetworks();
 
+        UpdateUnitMovementBonuses();
+
         foreach (var unit in Units)
         {
             unit.ResetMovement();
         }
         int scienceGenerated = CollectCityYields();
         Research.AddScience(scienceGenerated, this);
+
+        ApplyGreatLibraryCatchup();
         
         CalculateCulturalBorders();
         CheckCulturalFlipping();
+        ProcessDisease();
 
         ProcessAutomatedUnits();
 
@@ -2323,6 +2779,45 @@ public class GameSimulation
 
         // 4. Check for game end conditions
         CheckGameEndConditions();
+    }
+
+    private void ProcessDisease()
+    {
+        foreach (var city in Cities)
+        {
+            city.HasDisease = false;
+            if (city.Population > 1 && !city.HasBuilding<Hospital>())
+            {
+                // Check for adjacent Jungle or Floodplains
+                bool hasDiseaseSource = false;
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        var tile = Map.GetTile(city.X + dx, city.Y + dy);
+                        if (tile != null && (tile.Terrain.Id == "jungle" || tile.Terrain.Id == "floodplains"))
+                        {
+                            hasDiseaseSource = true;
+                            break;
+                        }
+                    }
+                    if (hasDiseaseSource) break;
+                }
+
+                if (hasDiseaseSource)
+                {
+                    // 5% chance per turn per vulnerable city
+                    if (Random.Shared.NextDouble() < 0.05)
+                    {
+                        city.HasDisease = true;
+                        city.Population -= 1;
+                        city.StoredFood = 0;
+                        Console.WriteLine($"[DISEASE] Disease struck the city of {city.Name}, killing 1 population!");
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -2689,7 +3184,7 @@ public class GameSimulation
                             tile.Terrain = TerrainRegistry.Get("grassland")!;
                             tile.Improvement = null;
                             var nearestCity = Cities.Where(c => c.Faction == unit.Faction)
-                                                    .OrderBy(c => Math.Abs(c.X - unit.X) + Math.Abs(c.Y - unit.Y))
+                                                    .OrderBy(c => Map.GetManhattanDistance(c.X, c.Y, unit.X, unit.Y))
                                                     .FirstOrDefault();
                             if (nearestCity != null)
                             {
@@ -2848,6 +3343,7 @@ public class GameSimulation
             AiCurrentResearchId = null;
             AiScienceProgress = 0;
             Console.WriteLine($"[AI Research] AI Rival has discovered {tech.Name}!");
+            ApplyGreatLibraryCatchup(Faction.Player);
         }
     }
 
@@ -2872,7 +3368,7 @@ public class GameSimulation
                         {
                             if (VisibilityGrid[x, y] == FogState.Shrouded || VisibilityGrid[x, y] == FogState.Unexplored)
                             {
-                                if (!Cities.Any(c => Math.Abs(c.X - x) + Math.Abs(c.Y - y) < 4)) // Keep away from cities
+                                if (!Cities.Any(c => Map.GetManhattanDistance(c.X, c.Y, x, y) < 4)) // Keep away from cities
                                 {
                                     validTiles.Add((x, y));
                                 }
@@ -2922,7 +3418,7 @@ public class GameSimulation
             var playerUnits = Units.Where(u => !u.IsBarbarian).ToList();
             foreach (var pUnit in playerUnits)
             {
-                int dist = Math.Max(Math.Abs(pUnit.X - barb.X), Math.Abs(pUnit.Y - barb.Y));
+                int dist = Map.GetChebyshevDistance(pUnit.X, pUnit.Y, barb.X, barb.Y);
                 if (dist < closestDist)
                 {
                     closestDist = dist;
@@ -2934,7 +3430,7 @@ public class GameSimulation
             // Search player cities
             foreach (var city in Cities)
             {
-                int dist = Math.Max(Math.Abs(city.X - barb.X), Math.Abs(city.Y - barb.Y));
+                int dist = Map.GetChebyshevDistance(city.X, city.Y, barb.X, barb.Y);
                 if (dist < closestDist)
                 {
                     closestDist = dist;
@@ -2954,8 +3450,8 @@ public class GameSimulation
                 }
                 else
                 {
-                    // Fallback to direct sign step if no path was found (e.g., if we want to attack or move directly)
-                    int stepX = barb.X + Math.Sign(targetX - barb.X);
+                    // Fallback to direct step if no path was found (e.g., if we want to attack or move directly)
+                    int stepX = Map.NormalizeX(barb.X + Map.GetStepDirectionX(barb.X, targetX));
                     int stepY = barb.Y + Math.Sign(targetY - barb.Y);
 
                     if (Map.IsInBounds(stepX, stepY))
@@ -2969,6 +3465,7 @@ public class GameSimulation
 
     private void ProcessAiRivalTurn()
     {
+        if (Mode != GameMode.SinglePlayer) return;
         AiRivalBrain.ProcessTurn(this);
     }
 
@@ -3001,7 +3498,7 @@ public class GameSimulation
                 for (int dy = -1; dy <= 1; dy++)
                 {
                     if (dx == 0 && dy == 0) continue;
-                    int tx = city.X + dx;
+                    int tx = Map.NormalizeX(city.X + dx);
                     int ty = city.Y + dy;
                     if (Map.IsInBounds(tx, ty) && !city.WorkedTiles.Contains((tx, ty)))
                     {
@@ -3060,6 +3557,14 @@ public class GameSimulation
         foreach (var city in Cities)
         {
             AutoAssignTiles(city);
+
+            // Update Draft timers
+            city.DraftsThisTurn = 0;
+            for (int i = city.DraftUnhappinessTimers.Count - 1; i >= 0; i--)
+            {
+                city.DraftUnhappinessTimers[i]--;
+                if (city.DraftUnhappinessTimers[i] <= 0) city.DraftUnhappinessTimers.RemoveAt(i);
+            }
 
             // Update citizen happiness/mood and accumulate culture
             city.UpdateCitizenMood(this, DifficultyConfig);
@@ -3216,9 +3721,20 @@ public class GameSimulation
             {
                 commerce = (int)Math.Round(commerce * 1.5f);
             }
-            if (city.Buildings.Any(b => b.Id == "iron_works"))
+
+            // Factory and Power Plants (Civ3 authentic production multipliers)
+            bool hasFactory = city.Buildings.Any(b => b.Id == "factory");
+            bool hasPower = city.Buildings.Any(b => b.Id == "coal_plant" || b.Id == "hydro_plant" || b.Id == "nuclear_plant")
+                            || IsCityPoweredByHooverDam(city);
+
+            float prodMultiplier = 1.0f;
+            if (hasFactory) prodMultiplier += 0.5f;
+            if (hasFactory && hasPower) prodMultiplier += 0.5f;
+            if (city.Buildings.Any(b => b.Id == "iron_works")) prodMultiplier += 1.0f; // Iron Works +100%
+
+            if (prodMultiplier > 1.0f)
             {
-                production *= 2;
+                production = (int)Math.Round(production * prodMultiplier);
             }
 
             // Apply Corruption & Waste (based on government type, distance to capital, and city rank)
@@ -3629,6 +4145,10 @@ public class GameSimulation
             ProductionProject.MarsColony => "mars_colony",
             ProductionProject.WorldBank => "world_bank",
             ProductionProject.SpaceStation => "space_station",
+            ProductionProject.GreatLibrary => "great_library",
+            ProductionProject.TheoryOfEvolution => "theory_of_evolution",
+            ProductionProject.MagellansVoyage => "magellans_voyage",
+            ProductionProject.HooverDam => "hoover_dam",
             // Small Wonders
             ProductionProject.HeroicEpic => "heroic_epic",
             ProductionProject.MilitaryAcademy => "military_academy",
@@ -3720,6 +4240,12 @@ public class GameSimulation
             }
 
             var unit = new Unit(unitId, type, city.X, city.Y, city.Faction, city.CivilizationId);
+
+            if (unit.IsNavalUnit && DoesFactionControlWonder(unit.Faction, "magellans_voyage"))
+            {
+                unit.MovementBonus = 2.0f;
+                unit.RemainingMovement = unit.MaxMovement;
+            }
 
             // Military Academy effect: if city has military_academy, military units start with +25% max health (125 HP instead of 100)
             if (city.Buildings.Any(b => b.Id == "military_academy") && unit.AttackStrength > 0)
@@ -3913,7 +4439,7 @@ public class GameSimulation
                         // Traverse neighbors
                         for (int i = 0; i < 8; i++)
                         {
-                            int nx = cx + dx[i];
+                            int nx = Map.NormalizeX(cx + dx[i]);
                             int ny = cy + dy[i];
                             if (Map.IsInBounds(nx, ny) && !visited.Contains((nx, ny)))
                             {
@@ -4098,6 +4624,10 @@ public class GameSimulation
             (production: ProductionProject.MarsColony, buildingId: "mars_colony"),
             (production: ProductionProject.WorldBank, buildingId: "world_bank"),
             (production: ProductionProject.SpaceStation, buildingId: "space_station"),
+            (production: ProductionProject.GreatLibrary, buildingId: "great_library"),
+            (production: ProductionProject.TheoryOfEvolution, buildingId: "theory_of_evolution"),
+            (production: ProductionProject.MagellansVoyage, buildingId: "magellans_voyage"),
+            (production: ProductionProject.HooverDam, buildingId: "hoover_dam"),
             // Small Wonders
             (production: ProductionProject.HeroicEpic, buildingId: "heroic_epic"),
             (production: ProductionProject.MilitaryAcademy, buildingId: "military_academy"),
@@ -4191,10 +4721,11 @@ public class GameSimulation
     public bool RebaseAirUnit(Unit unit, int targetX, int targetY)
     {
         if (unit.Domain != UnitDomain.Air || unit.RemainingMovement <= 0) return false;
+        targetX = Map.NormalizeX(targetX);
         
         // Rebase range in Civ3 is usually 4x Operational Range
         int maxRebaseRange = unit.OperationalRange * 4;
-        int distance = Math.Max(Math.Abs(unit.X - targetX), Math.Abs(unit.Y - targetY));
+        int distance = Map.GetChebyshevDistance(unit.X, unit.Y, targetX, targetY);
         if (distance > maxRebaseRange) return false;
 
         // Verify target is valid base
@@ -4216,8 +4747,9 @@ public class GameSimulation
     public void ExecuteAirBombard(Unit bomber, int targetX, int targetY)
     {
         if (bomber.Domain != UnitDomain.Air || bomber.RemainingMovement <= 0) return;
+        targetX = Map.NormalizeX(targetX);
         
-        int distance = Math.Max(Math.Abs(bomber.X - targetX), Math.Abs(bomber.Y - targetY));
+        int distance = Map.GetChebyshevDistance(bomber.X, bomber.Y, targetX, targetY);
         if (distance > bomber.OperationalRange) return;
 
         bomber.RemainingMovement = 0;
@@ -4307,12 +4839,13 @@ public class GameSimulation
 
     private bool CheckAirInterception(Unit bomber, int targetX, int targetY)
     {
+        targetX = Map.NormalizeX(targetX);
         // Find enemy fighters on Air Superiority mission whose operational range covers the target tile
         var interceptor = Units.FirstOrDefault(u => 
             u.Domain == UnitDomain.Air && 
             u.Faction != bomber.Faction &&
             u.CurrentAirMission == AirMission.AirSuperiority &&
-            Math.Max(Math.Abs(u.X - targetX), Math.Abs(u.Y - targetY)) <= u.OperationalRange);
+            Map.GetChebyshevDistance(u.X, u.Y, targetX, targetY) <= u.OperationalRange);
 
         if (interceptor != null)
         {

@@ -114,35 +114,87 @@ public partial class DomesticAdvisorPanel : PanelContainer
         
         var sliderVBox = new VBoxContainer();
         
+        // Ensure rates sum to 100
+        if (_sim.PlayerTaxRate + _sim.PlayerEntertainmentRate > 100) {
+            _sim.PlayerTaxRate = 100 - _sim.PlayerEntertainmentRate;
+        }
+        int currentScience = 100 - _sim.PlayerTaxRate - _sim.PlayerEntertainmentRate;
+
+        // --- Tax Slider ---
+        var taxSliderHBox = new HBoxContainer();
+        var taxIcon = new Label { Text = "🪙" };
+        var taxSlider = new HSlider { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MinValue = 0, MaxValue = 100, Step = 10, Value = _sim.PlayerTaxRate };
+        var taxSliderLabel = new Label { Text = $"{taxSlider.Value}%", CustomMinimumSize = new Vector2(40, 0) };
+        taxSliderLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.5f, 0.1f));
+        taxSliderHBox.AddChild(taxIcon);
+        taxSliderHBox.AddChild(taxSlider);
+        taxSliderHBox.AddChild(taxSliderLabel);
+        sliderVBox.AddChild(taxSliderHBox);
+
+        // --- Science Slider ---
         var scienceSliderHBox = new HBoxContainer();
         var scIcon = new Label { Text = "🧪" };
-        var scSlider = new HSlider();
-        scSlider.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        scSlider.MinValue = 0;
-        scSlider.MaxValue = 100;
-        scSlider.Step = 10;
-        scSlider.Value = 100 - _sim.PlayerTaxRate; // Science is 100 - tax
-        
-        _scienceSliderLabel = new Label { Text = $"{scSlider.Value}%" };
-        _scienceSliderLabel.AddThemeColorOverride("font_color", new Color(0.2f, 0.2f, 0.6f));
-        _scienceSliderLabel.CustomMinimumSize = new Vector2(40, 0);
-        
-        scSlider.ValueChanged += (val) => {
-            _sim.PlayerTaxRate = 100 - (int)val;
-            _scienceSliderLabel.Text = $"{val}%";
-            UpdateUI();
-        };
-        
+        var scSlider = new HSlider { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MinValue = 0, MaxValue = 100, Step = 10, Value = currentScience };
+        var scienceSliderLabel = new Label { Text = $"{scSlider.Value}%", CustomMinimumSize = new Vector2(40, 0) };
+        scienceSliderLabel.AddThemeColorOverride("font_color", new Color(0.2f, 0.2f, 0.6f));
         scienceSliderHBox.AddChild(scIcon);
         scienceSliderHBox.AddChild(scSlider);
-        scienceSliderHBox.AddChild(_scienceSliderLabel);
+        scienceSliderHBox.AddChild(scienceSliderLabel);
         sliderVBox.AddChild(scienceSliderHBox);
-        
-        var sliderHelpText = new Label { Text = "Tax Rate adjusts automatically." };
-        sliderHelpText.AddThemeColorOverride("font_color", new Color(0.4f, 0.4f, 0.4f));
-        sliderHelpText.AddThemeFontSizeOverride("font_size", 12);
-        sliderHelpText.HorizontalAlignment = HorizontalAlignment.Center;
-        sliderVBox.AddChild(sliderHelpText);
+
+        // --- Entertainment Slider ---
+        var entSliderHBox = new HBoxContainer();
+        var entIcon = new Label { Text = "🎭" };
+        var entSlider = new HSlider { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, MinValue = 0, MaxValue = 100, Step = 10, Value = _sim.PlayerEntertainmentRate };
+        var entSliderLabel = new Label { Text = $"{entSlider.Value}%", CustomMinimumSize = new Vector2(40, 0) };
+        entSliderLabel.AddThemeColorOverride("font_color", new Color(0.6f, 0.2f, 0.6f));
+        entSliderHBox.AddChild(entIcon);
+        entSliderHBox.AddChild(entSlider);
+        entSliderHBox.AddChild(entSliderLabel);
+        sliderVBox.AddChild(entSliderHBox);
+
+        // Slider logic
+        bool isUpdating = false;
+
+        void UpdateRates(string source)
+        {
+            if (isUpdating) return;
+            isUpdating = true;
+
+            int t = (int)taxSlider.Value;
+            int s = (int)scSlider.Value;
+            int e = (int)entSlider.Value;
+
+            if (source == "tax")
+            {
+                if (t + e > 100) { e = 100 - t; entSlider.Value = e; }
+                s = 100 - t - e; scSlider.Value = s;
+            }
+            else if (source == "sci")
+            {
+                if (s + e > 100) { e = 100 - s; entSlider.Value = e; }
+                t = 100 - s - e; taxSlider.Value = t;
+            }
+            else if (source == "ent")
+            {
+                if (t + e > 100) { t = 100 - e; taxSlider.Value = t; }
+                s = 100 - t - e; scSlider.Value = s;
+            }
+
+            _sim.PlayerTaxRate = t;
+            _sim.PlayerEntertainmentRate = e;
+
+            taxSliderLabel.Text = $"{t}%";
+            scienceSliderLabel.Text = $"{s}%";
+            entSliderLabel.Text = $"{e}%";
+
+            UpdateUI();
+            isUpdating = false;
+        }
+
+        taxSlider.ValueChanged += (_) => UpdateRates("tax");
+        scSlider.ValueChanged += (_) => UpdateRates("sci");
+        entSlider.ValueChanged += (_) => UpdateRates("ent");
 
         sMargin.AddChild(sliderVBox);
         slidersPanel.AddChild(sMargin);

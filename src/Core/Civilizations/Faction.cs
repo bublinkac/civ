@@ -1,5 +1,13 @@
 namespace CivGame.Core;
 
+public enum GameMode
+{
+    SinglePlayer,
+    Hotseat,
+    NetworkHost,
+    NetworkClient
+}
+
 public enum Faction
 {
     Player,

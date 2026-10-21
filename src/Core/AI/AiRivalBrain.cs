@@ -136,21 +136,32 @@ public static class AiRivalBrain
             if (!sim.Units.Contains(unit)) continue;
             if (!unit.HasMovementRemaining()) continue;
 
-            switch (unit.Type)
+            if (unit.IsNavalUnit)
             {
-                case UnitType.Settler:
-                    ExecuteSettlerTask(sim, unit);
-                    break;
-                case UnitType.Worker:
-                    ExecuteWorkerTask(sim, unit);
-                    break;
-                case UnitType.Explorer:
-                    ExecuteExplorerTask(sim, unit, rand);
-                    break;
-                case UnitType.Warrior:
-                case UnitType.Archer:
-                    ExecuteMilitaryTask(sim, unit, leader, aiCities);
-                    break;
+                if (unit.TransportCapacity > 0)
+                {
+                    ExecuteTransportTask(sim, unit, leader);
+                }
+                else
+                {
+                    ExecuteNavalWarshipTask(sim, unit, leader);
+                }
+            }
+            else if (unit.Type == UnitType.Settler)
+            {
+                ExecuteSettlerTask(sim, unit);
+            }
+            else if (unit.Type == UnitType.Worker)
+            {
+                ExecuteWorkerTask(sim, unit);
+            }
+            else if (unit.Type == UnitType.Explorer)
+            {
+                ExecuteExplorerTask(sim, unit, rand);
+            }
+            else
+            {
+                ExecuteMilitaryTask(sim, unit, leader, aiCities);
             }
         }
     }
@@ -167,7 +178,7 @@ public static class AiRivalBrain
         var playerUnits = sim.Units.Where(u => u.Faction == Faction.Player).ToList();
         foreach (var pUnit in playerUnits)
         {
-            int dist = Math.Max(Math.Abs(pUnit.X - city.X), Math.Abs(pUnit.Y - city.Y));
+            int dist = sim.Map.GetChebyshevDistance(pUnit.X, pUnit.Y, city.X, city.Y);
             if (dist <= 3)
             {
                 underThreat = true;
@@ -240,6 +251,28 @@ public static class AiRivalBrain
             city.CurrentProject = GetBestDefensiveUnit(city, sim);
             Console.WriteLine($"[AI Rival] City {city.Name} is undefended! Training {city.CurrentProject}.");
             return;
+        }
+
+        // Priority 1b: Coastal city naval fleet planning (Transports and Escort Warships)
+        if (city.IsCoastal(sim.Map))
+        {
+            int aiTransports = sim.Units.Count(u => u.Faction == Faction.AiRival && u.IsNavalUnit && u.TransportCapacity > 0);
+            bool playerAcrossWater = sim.Cities.Any(c => c.Faction == Faction.Player && !sim.Map.AreOnSameContinent(city.X, city.Y, c.X, c.Y));
+
+            if (playerAcrossWater && aiTransports == 0 && city.Population >= 2)
+            {
+                city.CurrentProject = GetBestNavalTransport(city, sim);
+                Console.WriteLine($"[Naval AI] Coastal city {city.Name} constructing invasion transport: {city.CurrentProject}!");
+                return;
+            }
+
+            int aiWarships = sim.Units.Count(u => u.Faction == Faction.AiRival && u.IsNavalUnit && u.TransportCapacity == 0 && u.AttackStrength > 0);
+            if (aiWarships < 2 && (sim.IsAtWarWithAi || aiTransports > 0))
+            {
+                city.CurrentProject = GetBestNavalWarship(city, sim);
+                Console.WriteLine($"[Naval AI] Coastal city {city.Name} constructing naval warship: {city.CurrentProject}!");
+                return;
+            }
         }
 
         // Priority 2: Rapid early expansion (REX) - Spawn Settler if criteria met
@@ -439,7 +472,7 @@ public static class AiRivalBrain
                 bool tooClose = false;
                 foreach (var city in sim.Cities)
                 {
-                    int dist = Math.Max(Math.Abs(city.X - x), Math.Abs(city.Y - y));
+                    int dist = sim.Map.GetChebyshevDistance(city.X, city.Y, x, y);
                     if (dist < 4)
                     {
                         tooClose = true;
@@ -464,7 +497,7 @@ public static class AiRivalBrain
                 }
 
                 // Prefer closer targets slightly to minimize travel turns
-                int travelDist = Math.Max(Math.Abs(settler.X - x), Math.Abs(settler.Y - y));
+                int travelDist = sim.Map.GetChebyshevDistance(settler.X, settler.Y, x, y);
                 siteScore -= travelDist * 0.15f;
 
                 if (siteScore > bestScore)
@@ -479,7 +512,7 @@ public static class AiRivalBrain
         // 2. Head to the best settlement site
         if (bestX != -1 && bestY != -1)
         {
-            int currentDist = Math.Max(Math.Abs(settler.X - bestX), Math.Abs(settler.Y - bestY));
+            int currentDist = sim.Map.GetChebyshevDistance(settler.X, settler.Y, bestX, bestY);
             if (currentDist <= 1 && sim.CanBuildCity(settler))
             {
                 var newCity = sim.BuildCity(settler);
@@ -521,7 +554,7 @@ public static class AiRivalBrain
         int minCityDist = int.MaxValue;
         foreach (var c in aiCities)
         {
-            int d = Math.Max(Math.Abs(worker.X - c.X), Math.Abs(worker.Y - c.Y));
+            int d = sim.Map.GetChebyshevDistance(worker.X, worker.Y, c.X, c.Y);
             if (d < minCityDist)
             {
                 minCityDist = d;
@@ -538,7 +571,7 @@ public static class AiRivalBrain
         {
             for (int dy = -radius; dy <= radius; dy++)
             {
-                int tx = nearestCity.X + dx;
+                int tx = sim.Map.NormalizeX(nearestCity.X + dx);
                 int ty = nearestCity.Y + dy;
                 if (!sim.Map.IsInBounds(tx, ty)) continue;
 
@@ -641,7 +674,7 @@ public static class AiRivalBrain
             {
                 if (sim.VisibilityGrid[x, y] == FogState.Unexplored)
                 {
-                    int d = Math.Abs(explorer.X - x) + Math.Abs(explorer.Y - y);
+                    int d = sim.Map.GetManhattanDistance(explorer.X, explorer.Y, x, y);
                     if (d < minExplorerDist)
                     {
                         var tile = sim.Map.GetTile(x, y);
@@ -691,7 +724,7 @@ public static class AiRivalBrain
 
             foreach (var city in playerCities)
             {
-                int dist = Math.Max(Math.Abs(city.X - military.X), Math.Abs(city.Y - military.Y));
+                int dist = sim.Map.GetChebyshevDistance(city.X, city.Y, military.X, military.Y);
                 if (dist < minCityDist)
                 {
                     minCityDist = dist;
@@ -707,6 +740,38 @@ public static class AiRivalBrain
                     var (nextX, nextY) = path[1];
                     sim.MoveUnit(military, nextX, nextY);
                     return;
+                }
+                else
+                {
+                    // Target city cannot be reached on foot (different continent / across water)
+                    // Path to or board a nearby friendly transport ship!
+                    var transport = sim.Units.FirstOrDefault(u => 
+                        u.Faction == military.Faction && 
+                        u.IsNavalUnit && 
+                        u.TransportCapacity > 0 && 
+                        u.LoadedUnitIds.Count < u.TransportCapacity);
+
+                    if (transport != null)
+                    {
+                        int dist = sim.Map.GetChebyshevDistance(transport.X, transport.Y, military.X, military.Y);
+                        if (dist <= 1)
+                        {
+                            if (sim.LoadUnitIntoTransport(military, transport))
+                            {
+                                Console.WriteLine($"[Naval AI] {military.Type} embarked on invasion transport {transport.Type} at ({transport.X}, {transport.Y})!");
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            var walkPath = sim.FindPath(military, military.X, military.Y, transport.X, transport.Y, ignoreUnits: true);
+                            if (walkPath != null && walkPath.Count > 1)
+                            {
+                                sim.MoveUnit(military, walkPath[1].X, walkPath[1].Y);
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -738,7 +803,7 @@ public static class AiRivalBrain
             int minCampDist = int.MaxValue;
             foreach (var camp in sim.BarbarianCamps)
             {
-                int d = Math.Max(Math.Abs(military.X - camp.X), Math.Abs(military.Y - camp.Y));
+                int d = sim.Map.GetChebyshevDistance(military.X, military.Y, camp.X, camp.Y);
                 if (d < minCampDist)
                 {
                     minCampDist = d;
@@ -776,7 +841,7 @@ public static class AiRivalBrain
 
         foreach (int idx in indices)
         {
-            int tx = unit.X + dxs[idx];
+            int tx = sim.Map.NormalizeX(unit.X + dxs[idx]);
             int ty = unit.Y + dys[idx];
             if (sim.Map.IsInBounds(tx, ty))
             {
@@ -800,7 +865,7 @@ public static class AiRivalBrain
 
         foreach (int idx in new[] { 0, 1, 2, 3, 4, 5, 6, 7 })
         {
-            int tx = unit.X + dxs[idx];
+            int tx = sim.Map.NormalizeX(unit.X + dxs[idx]);
             int ty = unit.Y + dys[idx];
             if (sim.Map.IsInBounds(tx, ty))
             {
@@ -815,5 +880,348 @@ public static class AiRivalBrain
             }
         }
         return null;
+    }
+
+    private static ProductionProject GetBestNavalTransport(City city, GameSimulation sim)
+    {
+        UnitType[] candidates = new[]
+        {
+            UnitType.Transport,
+            UnitType.Galleon,
+            UnitType.Caravel,
+            UnitType.Galley
+        };
+
+        foreach (var baseType in candidates)
+        {
+            var effectiveType = UnitDefinitionRegistry.GetCivUnitType(baseType, city.CivilizationId);
+            var def = UnitDefinitionRegistry.Get(effectiveType);
+
+            if (def.RequiredTechId != null && !sim.IsTechResearched(city.Faction, def.RequiredTechId))
+                continue;
+
+            bool hasAllRes = true;
+            foreach (var reqRes in def.RequiredResourceIds)
+            {
+                if (!sim.CityHasResourceAccess(city, reqRes))
+                {
+                    hasAllRes = false;
+                    break;
+                }
+            }
+            if (!hasAllRes) continue;
+
+            return UnitDefinitionRegistry.MapUnitTypeToProject(effectiveType);
+        }
+
+        return ProductionProject.Galley;
+    }
+
+    private static ProductionProject GetBestNavalWarship(City city, GameSimulation sim)
+    {
+        UnitType[] candidates = new[]
+        {
+            UnitType.Battleship,
+            UnitType.AegisCruiser,
+            UnitType.Cruiser,
+            UnitType.Destroyer,
+            UnitType.Ironclad,
+            UnitType.Frigate,
+            UnitType.Dromon,
+            UnitType.Curragh
+        };
+
+        foreach (var baseType in candidates)
+        {
+            var effectiveType = UnitDefinitionRegistry.GetCivUnitType(baseType, city.CivilizationId);
+            var def = UnitDefinitionRegistry.Get(effectiveType);
+
+            if (def.RequiredTechId != null && !sim.IsTechResearched(city.Faction, def.RequiredTechId))
+                continue;
+
+            bool hasAllRes = true;
+            foreach (var reqRes in def.RequiredResourceIds)
+            {
+                if (!sim.CityHasResourceAccess(city, reqRes))
+                {
+                    hasAllRes = false;
+                    break;
+                }
+            }
+            if (!hasAllRes) continue;
+
+            return UnitDefinitionRegistry.MapUnitTypeToProject(effectiveType);
+        }
+
+        return ProductionProject.Curragh;
+    }
+
+    private static void ExecuteTransportTask(GameSimulation sim, Unit transport, LeaderStrategy leader)
+    {
+        if (transport.RemainingMovement <= 0) return;
+
+        // 1. If transport has cargo, sail towards the invasion target!
+        if (transport.LoadedUnitIds.Count > 0)
+        {
+            var playerCities = sim.Cities.Where(c => c.Faction == Faction.Player).ToList();
+            City? targetCity = null;
+            int minCityDist = int.MaxValue;
+
+            foreach (var c in playerCities)
+            {
+                int dist = sim.Map.GetChebyshevDistance(c.X, c.Y, transport.X, transport.Y);
+                if (dist < minCityDist)
+                {
+                    minCityDist = dist;
+                    targetCity = c;
+                }
+            }
+
+            (int X, int Y)? landingSpot = null;
+            if (targetCity != null)
+            {
+                // Check if we are adjacent to land near the target
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int tx = sim.Map.NormalizeX(transport.X + dx);
+                        int ty = transport.Y + dy;
+                        if (sim.Map.IsInBounds(tx, ty))
+                        {
+                            var t = sim.Map.GetTile(tx, ty);
+                            if (t != null && t.IsLand)
+                            {
+                                var existingUnit = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null);
+                                if (existingUnit == null || existingUnit.Faction == transport.Faction)
+                                {
+                                    landingSpot = (tx, ty);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (landingSpot.HasValue) break;
+                }
+
+                // If adjacent to a landing spot, launch the amphibious landing!
+                if (landingSpot.HasValue)
+                {
+                    var loadedIds = transport.LoadedUnitIds.ToList();
+                    foreach (var cargoId in loadedIds)
+                    {
+                        var cargo = sim.Units.Find(u => u.Id == cargoId);
+                        if (cargo != null)
+                        {
+                            if (sim.UnloadUnitFromTransport(cargo, landingSpot.Value.X, landingSpot.Value.Y))
+                            {
+                                Console.WriteLine($"[Naval AI] Faction {transport.Faction} launched amphibious invasion landing {cargo.Type} at ({landingSpot.Value.X}, {landingSpot.Value.Y}) near {targetCity.Name}!");
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                // Otherwise, sail towards the water tile closest to targetCity
+                (int X, int Y)? bestWaterTile = null;
+                int minWaterDist = int.MaxValue;
+
+                for (int dx = -2; dx <= 2; dx++)
+                {
+                    for (int dy = -2; dy <= 2; dy++)
+                    {
+                        int wx = sim.Map.NormalizeX(targetCity.X + dx);
+                        int wy = targetCity.Y + dy;
+                        if (sim.Map.IsInBounds(wx, wy))
+                        {
+                            var wt = sim.Map.GetTile(wx, wy);
+                            if (wt != null && wt.IsOcean)
+                            {
+                                int d = sim.Map.GetChebyshevDistance(wx, wy, transport.X, transport.Y);
+                                if (d < minWaterDist)
+                                {
+                                    minWaterDist = d;
+                                    bestWaterTile = (wx, wy);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (bestWaterTile.HasValue)
+                {
+                    var path = sim.FindPath(transport, transport.X, transport.Y, bestWaterTile.Value.X, bestWaterTile.Value.Y, ignoreUnits: true);
+                    if (path != null && path.Count > 1)
+                    {
+                        sim.MoveUnit(transport, path[1].X, path[1].Y);
+                        return;
+                    }
+                }
+            }
+        }
+        else
+        {
+            // 2. Transport is empty — look for friendly units to board
+            var nearbyLandUnits = sim.Units.Where(u => 
+                u.Faction == transport.Faction && 
+                u.Domain == UnitDomain.Land && 
+                u.TransportUnitId == null &&
+                (u.AttackStrength > 0 || u.Type == UnitType.Settler)).ToList();
+
+            foreach (var candidate in nearbyLandUnits)
+            {
+                if (transport.LoadedUnitIds.Count >= transport.TransportCapacity) break;
+                int dist = sim.Map.GetChebyshevDistance(candidate.X, candidate.Y, transport.X, transport.Y);
+                if (dist <= 1)
+                {
+                    if (sim.LoadUnitIntoTransport(candidate, transport))
+                    {
+                        Console.WriteLine($"[Naval AI] {candidate.Type} boarded transport {transport.Type} at ({transport.X}, {transport.Y})!");
+                    }
+                }
+            }
+
+            if (transport.LoadedUnitIds.Count > 0) return;
+
+            // If empty, sail to the closest friendly coastal city
+            var aiCities = sim.Cities.Where(c => c.Faction == transport.Faction && c.IsCoastal(sim.Map)).ToList();
+            if (aiCities.Count > 0)
+            {
+                var homeCity = aiCities.OrderBy(c => sim.Map.GetChebyshevDistance(c.X, c.Y, transport.X, transport.Y)).First();
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        int wx = sim.Map.NormalizeX(homeCity.X + dx);
+                        int wy = homeCity.Y + dy;
+                        if (sim.Map.IsInBounds(wx, wy) && (wx != transport.X || wy != transport.Y))
+                        {
+                            var wt = sim.Map.GetTile(wx, wy);
+                            if (wt != null && wt.IsOcean)
+                            {
+                                var path = sim.FindPath(transport, transport.X, transport.Y, wx, wy, ignoreUnits: true);
+                                if (path != null && path.Count > 1)
+                                {
+                                    sim.MoveUnit(transport, path[1].X, path[1].Y);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void ExecuteNavalWarshipTask(GameSimulation sim, Unit warship, LeaderStrategy leader)
+    {
+        if (warship.RemainingMovement <= 0) return;
+
+        // 1. Attack adjacent enemy ships / transports
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int tx = sim.Map.NormalizeX(warship.X + dx);
+                int ty = warship.Y + dy;
+                if (!sim.Map.IsInBounds(tx, ty)) continue;
+
+                var hostile = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(warship, u) && u.Domain == UnitDomain.Sea);
+                if (hostile != null)
+                {
+                    Console.WriteLine($"[Naval AI] {warship.Type} engages enemy {hostile.Type} at ({tx}, {ty})!");
+                    sim.MoveUnit(warship, tx, ty);
+                    return;
+                }
+            }
+        }
+
+        // 2. Coastal bombardment if warship has Bombard capability
+        if (warship.BombardStrength > 0)
+        {
+            for (int dx = -warship.BombardRange; dx <= warship.BombardRange; dx++)
+            {
+                for (int dy = -warship.BombardRange; dy <= warship.BombardRange; dy++)
+                {
+                    if (dx == 0 && dy == 0) continue;
+                    int tx = sim.Map.NormalizeX(warship.X + dx);
+                    int ty = warship.Y + dy;
+                    if (!sim.Map.IsInBounds(tx, ty)) continue;
+
+                    var enemyCity = sim.Cities.Find(c => c.X == tx && c.Y == ty && c.Faction == Faction.Player);
+                    var enemyUnit = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(warship, u));
+                    if (enemyCity != null || enemyUnit != null)
+                    {
+                        Console.WriteLine($"[Naval AI] {warship.Type} conducts naval bombardment on ({tx}, {ty})!");
+                        sim.ExecuteBombard(warship, tx, ty);
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 3. Escort friendly loaded transports
+        var friendlyTransport = sim.Units.FirstOrDefault(u => 
+            u.Faction == warship.Faction && 
+            u.IsNavalUnit && 
+            u.LoadedUnitIds.Count > 0 && 
+            u.Id != warship.Id);
+
+        if (friendlyTransport != null)
+        {
+            int distToTransport = sim.Map.GetChebyshevDistance(friendlyTransport.X, friendlyTransport.Y, warship.X, warship.Y);
+            if (distToTransport > 1)
+            {
+                var path = sim.FindPath(warship, warship.X, warship.Y, friendlyTransport.X, friendlyTransport.Y, ignoreUnits: true);
+                if (path != null && path.Count > 1)
+                {
+                    sim.MoveUnit(warship, path[1].X, path[1].Y);
+                    return;
+                }
+            }
+        }
+
+        // 4. Hunt enemy naval vessels or patrol towards enemy coastal waters
+        var enemyShip = sim.Units.FirstOrDefault(u => u.Domain == UnitDomain.Sea && sim.IsHostile(warship, u));
+        if (enemyShip != null)
+        {
+            var path = sim.FindPath(warship, warship.X, warship.Y, enemyShip.X, enemyShip.Y, ignoreUnits: true);
+            if (path != null && path.Count > 1)
+            {
+                sim.MoveUnit(warship, path[1].X, path[1].Y);
+                return;
+            }
+        }
+
+        // 5. Patrol random adjacent water tile
+        MoveRandomAdjacentWater(sim, warship);
+    }
+
+    private static void MoveRandomAdjacentWater(GameSimulation sim, Unit navalUnit)
+    {
+        var rand = new Random();
+        int[] dxs = { -1, 0, 1, -1, 1, -1, 0, 1 };
+        int[] dys = { -1, -1, -1, 0, 0, 1, 1, 1 };
+        var indices = Enumerable.Range(0, 8).OrderBy(_ => rand.Next()).ToList();
+
+        foreach (var i in indices)
+        {
+            int nx = sim.Map.NormalizeX(navalUnit.X + dxs[i]);
+            int ny = navalUnit.Y + dys[i];
+            if (sim.Map.IsInBounds(nx, ny))
+            {
+                var tile = sim.Map.GetTile(nx, ny);
+                if (tile != null && tile.IsOcean)
+                {
+                    if (sim.ValidateUnitMove(navalUnit, nx, ny).IsValid)
+                    {
+                        sim.MoveUnit(navalUnit, nx, ny);
+                        return;
+                    }
+                }
+            }
+        }
     }
 }

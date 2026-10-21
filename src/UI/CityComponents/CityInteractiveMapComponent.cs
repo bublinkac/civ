@@ -55,7 +55,7 @@ public partial class CityInteractiveMapComponent : PanelContainer
         {
             for (int dx = -2; dx <= 2; dx++)
             {
-                int tileX = _city.X + dx;
+                int tileX = _sim.Map.NormalizeX(_city.X + dx);
                 int tileY = _city.Y + dy;
                 
                 // Calculate isometric position relative to center anchor
@@ -97,7 +97,7 @@ public partial class CityInteractiveMapComponent : PanelContainer
                 tileControl.AddChild(line);
 
                 // City Center Icon (🏰)
-                if (tileX == _city.X && tileY == _city.Y)
+                if (dx == 0 && dy == 0)
                 {
                     var label = new Label { 
                         Text = "🏰", 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace CivGame.Core;
 
@@ -104,6 +105,7 @@ public enum UnitType
     Helicopter,
     CruiseMissile,
     TacticalNuke,
+    ICBM,
 
     // Unique Units (UU) - Land
     Legionary,
@@ -176,12 +178,14 @@ public class Unit
         }
     }
     
+    public float MovementBonus { get; set; } = 0f;
+
     public float MaxMovement 
     { 
         get 
         {
             if (Type == UnitType.Army && LoadedUnitIds.Count > 0) return 0; // Handled specially
-            return _baseMaxMovement;
+            return _baseMaxMovement + MovementBonus;
         }
     }
 
@@ -302,12 +306,22 @@ public class Unit
 
     public bool HasMovementRemaining() => RemainingMovement > 0.0f && !IsWorkerBuilding() && !IsSleeping && !IsFortified && !IsSentry && !IsAutomated && !IsLoadedInTransport;
 
-    public bool CanBoardTransport(Unit transport)
+    public bool CanBoardTransport(Unit transport, GameSimulation? sim = null)
     {
         if (transport.Type != UnitType.Army && transport.Domain != UnitDomain.Sea && transport.Domain != UnitDomain.Air) return false;
         if (transport.Faction != Faction) return false;
-        if (transport.LoadedUnitIds.Count >= transport.TransportCapacity) return false;
         if (IsLoadedInTransport) return false;
+
+        int capacity = transport.TransportCapacity;
+        if (transport.Type == UnitType.Army && sim != null)
+        {
+            if (sim.Cities.Any(c => c.Faction == transport.Faction && c.Buildings.Any(b => b.Id == "pentagon")))
+            {
+                capacity = 4;
+            }
+        }
+        
+        if (transport.LoadedUnitIds.Count >= capacity) return false;
         
         // Army logic: only land combat units can join armies, and once they join they can never leave (but we won't strictly enforce 'never leave' here)
         if (transport.Type == UnitType.Army)
@@ -325,9 +339,9 @@ public class Unit
         return true;
     }
 
-    public void BoardTransport(Unit transport)
+    public void BoardTransport(Unit transport, GameSimulation? sim = null)
     {
-        if (!CanBoardTransport(transport)) return;
+        if (!CanBoardTransport(transport, sim)) return;
         TransportUnitId = transport.Id;
         transport.LoadedUnitIds.Add(Id);
         X = transport.X;

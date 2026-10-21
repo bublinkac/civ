@@ -62,6 +62,9 @@ public class MapGenerator
         // Second pass: Generate Rivers
         GenerateRivers(map, resolved);
 
+        // Third pass: Calculate Continents
+        map.CalculateContinents();
+
         return map;
     }
 

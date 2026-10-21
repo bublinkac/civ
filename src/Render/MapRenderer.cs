@@ -24,6 +24,7 @@ public partial class MapRenderer : TileMapLayer
     private string? _selectedCityId;
     private GameHud? _hud;
     private HighlightRenderer? _highlightRenderer;
+    private TargetingReticleRenderer? _targetingReticleRenderer;
     private CityRenderer? _cityRenderer;
     private BorderRenderer? _borderRenderer;
     private PollutionRenderer? _pollutionRenderer;
@@ -32,10 +33,20 @@ public partial class MapRenderer : TileMapLayer
     private AdvisorsMenu? _advisorsMenu;
     private AdvisorScreen? _advisorScreen;
     private GovernmentPanel? _governmentPanel;
+    private CityCaptureDialog? _cityCaptureDialog;
+    private HotseatTransitionModal? _hotseatModal;
+
+    // Interactive targeting state (Bombard / Air Strikes)
+    private bool _isTargetingMode;
+    private string? _targetingAction;
+    private string? _targetingSourceUnitId;
+
     private bool IsFullScreenUiOpen => GodotObject.IsInstanceValid(_cityDetail) ||
                                        GodotObject.IsInstanceValid(_advisorsMenu) ||
                                        GodotObject.IsInstanceValid(_advisorScreen) ||
-                                       GodotObject.IsInstanceValid(_governmentPanel);
+                                       GodotObject.IsInstanceValid(_governmentPanel) ||
+                                       GodotObject.IsInstanceValid(_cityCaptureDialog) ||
+                                       GodotObject.IsInstanceValid(_hotseatModal);
 
 
     private MainMenu? _mainMenu;
@@ -48,6 +59,11 @@ public partial class MapRenderer : TileMapLayer
             _cityDetail.QueueFree();
         }
         if (_sim == null) return;
+        if (!CanControlFaction(city.Faction))
+        {
+            _hud?.ShowNotification("CUDZIE MESTO", $"Mesto {city.Name} patrí frakcii {city.Faction}. Nemôžete riadiť jeho vnútorné záležitosti.");
+            return;
+        }
 
         _cityDetail = new CityDetailPanel(city, _sim);
         
@@ -151,6 +167,18 @@ public partial class MapRenderer : TileMapLayer
             _mainMenu = null;
             StartGame(setupOptions);
         };
+        _mainMenu.OnStartHotseatGame += (setupOptions) =>
+        {
+            _mainMenu.QueueFree();
+            _mainMenu = null;
+            StartGame(setupOptions);
+        };
+        _mainMenu.OnStartNetworkGame += (setupOptions) =>
+        {
+            _mainMenu.QueueFree();
+            _mainMenu = null;
+            StartNetworkGame(setupOptions);
+        };
         _mainMenu.OnLoadGame += () =>
         {
             _mainMenu.QueueFree();
@@ -171,6 +199,7 @@ public partial class MapRenderer : TileMapLayer
         }
 
         _sim = loadedSim;
+        _sim.OnHotseatTurnChange += OnHotseatTurnChange;
         MapWidth = _sim.Map.Width;
         MapHeight = _sim.Map.Height;
 
@@ -199,10 +228,14 @@ public partial class MapRenderer : TileMapLayer
         var generator = new MapGenerator(Seed);
         var map = generator.Generate(resolved);
         _sim = new GameSimulation(map);
+        _sim.Mode = resolved.Mode;
+        _sim.Player1Name = resolved.Player1Name;
+        _sim.Player2Name = resolved.Player2Name;
         _sim.PlayerCivId = resolved.PlayerCivId;
         _sim.AiCivId = resolved.AiCivId;
         _sim.Difficulty = resolved.Difficulty;
         _sim.SetupInitialUnits();
+        _sim.OnHotseatTurnChange += OnHotseatTurnChange;
 
         // 3. Programmatically configure TileSet for Isometric layout
         SetupTileSet();
@@ -215,6 +248,169 @@ public partial class MapRenderer : TileMapLayer
 
         // 6. Setup Controllable Camera and focus on starting unit
         SetupCamera();
+    }
+
+    private void StartNetworkGame(GameSetupOptions setupOptions)
+    {
+        CivGame.Network.CivNetworkManager.Instance.OnTurnStateReceived += HandleNetworkTurnStateReceived;
+
+        if (setupOptions.Mode == GameMode.NetworkClient)
+        {
+            if (CivGame.Network.CivNetworkManager.Instance.LastReceivedStartDto != null)
+            {
+                _sim = JsonSaveSystem.ReconstructFromDto(CivGame.Network.CivNetworkManager.Instance.LastReceivedStartDto);
+                if (_sim != null)
+                {
+                    _sim.OnHotseatTurnChange += OnHotseatTurnChange;
+                    MapWidth = _sim.Map.Width;
+                    MapHeight = _sim.Map.Height;
+                    SetupTileSet();
+                    RenderMap();
+                    SetupPeerRenderers();
+                    SetupCamera();
+
+                    var myUnit = _sim.Units.Find(u => u.Faction == Faction.AiRival);
+                    if (myUnit != null && _camera != null)
+                    {
+                        _selectedUnitId = myUnit.Id;
+                        _camera.Position = MapToLocal(new Vector2I(myUnit.X, myUnit.Y));
+                    }
+                    UpdateUiAfterAction();
+                    _hud?.ShowNotification("ONLINE MULTIPLAYER", $"Pripojený k hre ako {_sim.Player2Name} ({_sim.AiCiv.Name})!\nHostiteľ {_sim.Player1Name} ({_sim.PlayerCiv.Name}) začína ťah.");
+                    return;
+                }
+            }
+        }
+
+        // Host Mode
+        StartGame(setupOptions);
+        if (_sim != null && setupOptions.Mode == GameMode.NetworkHost)
+        {
+            var dto = JsonSaveSystem.CreateDtoFromSimulation(_sim);
+            CivGame.Network.CivNetworkManager.Instance.SendGameStart(dto);
+            _hud?.ShowNotification("ONLINE HOST", $"Server spustený! Hráte ako {_sim.Player1Name} ({_sim.PlayerCiv.Name}). Ste na ťahu!");
+        }
+    }
+
+    private void HandleNetworkTurnStateReceived(SaveDataDto turnDto)
+    {
+        if (_sim == null) return;
+        var updatedSim = JsonSaveSystem.ReconstructFromDto(turnDto);
+        if (updatedSim != null)
+        {
+            _sim = updatedSim;
+            _sim.OnHotseatTurnChange += OnHotseatTurnChange;
+
+            var localFaction = _sim.Mode == GameMode.NetworkHost ? Faction.Player : Faction.AiRival;
+            if (_sim.ActiveTurnFaction == localFaction)
+            {
+                var myUnit = _sim.Units.Find(u => u.Faction == localFaction);
+                _selectedUnitId = myUnit?.Id;
+                _selectedCityId = null;
+                if (myUnit != null && _camera != null)
+                {
+                    _camera.Position = MapToLocal(new Vector2I(myUnit.X, myUnit.Y));
+                }
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+                _hud?.ShowNotification("STE NA ŤAHU!", $"Protihráč odovzdal ťah. Rok: {TurnTimeline.GetFormattedYear(_sim.TurnNumber)}.");
+            }
+            UpdateUiAfterAction();
+        }
+    }
+
+    private void OnHotseatTurnChange(Faction nextFaction)
+    {
+        if (_sim == null) return;
+
+        if (GodotObject.IsInstanceValid(_hotseatModal))
+        {
+            _hotseatModal.QueueFree();
+            _hotseatModal = null;
+        }
+
+        _selectedUnitId = null;
+        _selectedCityId = null;
+        _highlightRenderer?.Clear();
+
+        _hotseatModal = new HotseatTransitionModal(_sim, nextFaction, () =>
+        {
+            if (GodotObject.IsInstanceValid(_hotseatModal))
+            {
+                _hotseatModal.QueueFree();
+                _hotseatModal = null;
+            }
+
+            var nextUnit = _sim.Units.Find(u => u.Faction == nextFaction);
+            _selectedUnitId = nextUnit?.Id;
+            if (nextUnit != null && _camera != null)
+            {
+                _camera.Position = MapToLocal(new Vector2I(nextUnit.X, nextUnit.Y));
+            }
+            else
+            {
+                var nextCity = _sim.Cities.Find(c => c.Faction == nextFaction);
+                if (nextCity != null && _camera != null)
+                {
+                    _camera.Position = MapToLocal(new Vector2I(nextCity.X, nextCity.Y));
+                }
+            }
+
+            UpdateUiAfterAction();
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+        });
+
+        if (GodotObject.IsInstanceValid(_hud))
+        {
+            _hud.AddChild(_hotseatModal);
+        }
+        else
+        {
+            AddChild(_hotseatModal);
+        }
+    }
+
+    private bool CanControlFaction(Faction faction)
+    {
+        if (_sim == null) return false;
+        if (faction != _sim.ActiveTurnFaction) return false;
+        if (_sim.Mode == GameMode.NetworkHost && faction != Faction.Player) return false;
+        if (_sim.Mode == GameMode.NetworkClient && faction != Faction.AiRival) return false;
+        return true;
+    }
+
+    private void ExecuteEndTurn()
+    {
+        if (_sim == null) return;
+
+        if (_sim.Mode == GameMode.NetworkHost || _sim.Mode == GameMode.NetworkClient)
+        {
+            var localFaction = _sim.Mode == GameMode.NetworkHost ? Faction.Player : Faction.AiRival;
+            if (_sim.ActiveTurnFaction != localFaction)
+            {
+                _hud?.ShowNotification("NIE STE NA ŤAHU", "Momentálne je na ťahu protihráč. Počkajte na jeho ťah.");
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_error.wav");
+                return;
+            }
+
+            _sim.EndTurn();
+            var dto = JsonSaveSystem.CreateDtoFromSimulation(_sim);
+            CivGame.Network.CivNetworkManager.Instance.SendTurnState(dto);
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+            UpdateUiAfterAction();
+            _hud?.ShowNotification("ŤAH ODOSLANÝ", "Váš ťah bol odoslaný protihráčovi. Čaká sa na jeho ťah...");
+            return;
+        }
+
+        _sim.EndTurn();
+        GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
+        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+
+        if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
+        {
+            _selectedUnitId = null;
+        }
+
+        UpdateUiAfterAction();
     }
 
     private void SetupPeerRenderers()
@@ -233,6 +429,11 @@ public partial class MapRenderer : TileMapLayer
         // Instantiate Highlight renderer
         _highlightRenderer = new HighlightRenderer();
         GetParent().CallDeferred(Node.MethodName.AddChild, _highlightRenderer);
+
+        // Instantiate Targeting Reticle renderer
+        _targetingReticleRenderer = new TargetingReticleRenderer();
+        _targetingReticleRenderer.Initialize(this);
+        GetParent().CallDeferred(Node.MethodName.AddChild, _targetingReticleRenderer);
 
         // Instantiate City renderer
         _cityRenderer = new CityRenderer();
@@ -257,6 +458,9 @@ public partial class MapRenderer : TileMapLayer
         _hud.OnActionTriggered += HandleHudAction;
         _hud.OnMinimapTileSelected += HandleMinimapTileSelected;
         GetParent().CallDeferred(Node.MethodName.AddChild, _hud);
+
+        // City capture events
+        _sim.OnCityCapturePrompt += HandleCityCapturePrompt;
 
         // Golden Age events
         _sim.PlayerGoldenAge.OnGoldenAgeStarted += (faction, reason) => _hud?.ShowNotification("GOLDEN AGE!", $"{faction} has entered a Golden Age!\n({reason})\n+1 Production and +1 Commerce for 20 turns.");
@@ -731,10 +935,15 @@ public partial class MapRenderer : TileMapLayer
 
     private bool CheckIsFullScreenUiOpen() => GodotObject.IsInstanceValid(_cityDetail) || 
                                               GodotObject.IsInstanceValid(_advisorsMenu) || 
-                                              GodotObject.IsInstanceValid(_advisorScreen);
+                                              GodotObject.IsInstanceValid(_advisorScreen) ||
+                                              GodotObject.IsInstanceValid(_governmentPanel) ||
+                                              GodotObject.IsInstanceValid(_cityCaptureDialog) ||
+                                              GodotObject.IsInstanceValid(_hotseatModal);
 
     public override void _Process(double delta)
     {
+        CivGame.Network.CivNetworkManager.Instance.PollMessages();
+
         if (_camera == null || CheckIsFullScreenUiOpen()) return;
 
         Vector2 movement = Vector2.Zero;
@@ -778,6 +987,41 @@ public partial class MapRenderer : TileMapLayer
         // Block gameplay actions if the game has ended
         if (_sim.EndState != GameEndState.None) return;
 
+        // Handle Targeting Mode Input (Bombard / Air Strikes)
+        if (_isTargetingMode)
+        {
+            if (@event is InputEventMouseMotion)
+            {
+                Vector2I hoveredCell = LocalToMap(GetLocalMousePosition());
+                int hx = _sim != null ? _sim.Map.NormalizeX(hoveredCell.X) : hoveredCell.X;
+                _targetingReticleRenderer?.SetHoveredTile(hx, hoveredCell.Y);
+            }
+            else if (@event is InputEventMouseButton mb && mb.Pressed)
+            {
+                if (mb.ButtonIndex == MouseButton.Left)
+                {
+                    Vector2I targetCell = LocalToMap(GetLocalMousePosition());
+                    int tx = _sim != null ? _sim.Map.NormalizeX(targetCell.X) : targetCell.X;
+                    ExecuteTargetingAction(tx, targetCell.Y);
+                    return;
+                }
+                else if (mb.ButtonIndex == MouseButton.Right)
+                {
+                    CancelTargetingMode();
+                    return;
+                }
+            }
+            else if (@event is InputEventKey kb && kb.Pressed && !kb.Echo)
+            {
+                if (kb.Keycode == Key.Escape || kb.Keycode == Key.B)
+                {
+                    CancelTargetingMode();
+                    return;
+                }
+            }
+            return;
+        }
+
         if (@event is InputEventMouseButton mouseButton)
         {
             // Zoom controls
@@ -798,6 +1042,7 @@ public partial class MapRenderer : TileMapLayer
             if (mouseButton.ButtonIndex == MouseButton.Left && mouseButton.Pressed)
             {
                 Vector2I clickedCell = LocalToMap(GetLocalMousePosition());
+                clickedCell = new Vector2I(_sim.Map.NormalizeX(clickedCell.X), clickedCell.Y);
                 
                 if (!_sim.Map.IsInBounds(clickedCell.X, clickedCell.Y) || _sim.VisibilityGrid[clickedCell.X, clickedCell.Y] == FogState.Unexplored)
                 {
@@ -893,13 +1138,14 @@ public partial class MapRenderer : TileMapLayer
             if (mouseButton.ButtonIndex == MouseButton.Right && mouseButton.Pressed && !string.IsNullOrEmpty(_selectedUnitId))
             {
                 Vector2I targetCell = LocalToMap(GetLocalMousePosition());
+                targetCell = new Vector2I(_sim.Map.NormalizeX(targetCell.X), targetCell.Y);
                 Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
 
                 if (selectedUnit != null)
                 {
-                    if (selectedUnit.Faction != Faction.Player)
+                    if (!CanControlFaction(selectedUnit.Faction))
                     {
-                        GD.Print("[Control] Cannot command units belonging to other factions!");
+                        GD.Print("[Control] Cannot command units belonging to other factions or when not on turn!");
                         return;
                     }
 
@@ -937,30 +1183,14 @@ public partial class MapRenderer : TileMapLayer
         {
             if (keyEvent.Keycode == Key.Space)
             {
-                _sim.EndTurn();
-                GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
-                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
-                
-                // Clear selection if selected unit died during barbarian turn!
-                if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
-                {
-                    _selectedUnitId = null;
-                }
-
-                _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
-                _fogRenderer.UpdateFog(_sim);
-                _borderRenderer?.UpdateBorders(_sim);
-                _cityRenderer?.UpdateCities(_sim); // City stats or labels might update
-                Unit? turnUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                _highlightRenderer?.UpdateHighlight(_sim, turnUnit);
-                _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
+                ExecuteEndTurn();
             }
             else if (keyEvent.Keycode == Key.B && !string.IsNullOrEmpty(_selectedUnitId))
             {
                 Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
                 if (selectedUnit != null && selectedUnit.Type == UnitType.Settler)
                 {
-                    if (selectedUnit.Faction != Faction.Player)
+                    if (!CanControlFaction(selectedUnit.Faction))
                     {
                         GD.Print("[Control] Cannot settle a city with other factions' settlers!");
                         return;
@@ -987,15 +1217,38 @@ public partial class MapRenderer : TileMapLayer
                         GD.Print("[City Manager] Cannot build city here. Must be on land and not on top of another city.");
                     }
                 }
+                else if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.BombardRange > 0 && selectedUnit.HasMovementRemaining() && selectedUnit.Domain != UnitDomain.Air)
+                {
+                    StartTargetingMode("bombard", selectedUnit);
+                }
             }
             else if ((keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R || keyEvent.Keycode == Key.Y || keyEvent.Keycode == Key.S || keyEvent.Keycode == Key.A || keyEvent.Keycode == Key.E || keyEvent.Keycode == Key.P || keyEvent.Keycode == Key.U) && !string.IsNullOrEmpty(_selectedUnitId))
             {
                 Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
                 if (selectedUnit != null)
                 {
+                    if (selectedUnit.Domain == UnitDomain.Air && CanControlFaction(selectedUnit.Faction) && selectedUnit.HasMovementRemaining())
+                    {
+                        if (keyEvent.Keycode == Key.A)
+                        {
+                            StartTargetingMode("air_strike", selectedUnit);
+                            return;
+                        }
+                        if (keyEvent.Keycode == Key.R)
+                        {
+                            StartTargetingMode("air_recon", selectedUnit);
+                            return;
+                        }
+                        if (keyEvent.Keycode == Key.E)
+                        {
+                            StartTargetingMode("air_rebase", selectedUnit);
+                            return;
+                        }
+                    }
+
                     if (selectedUnit.Type == UnitType.Worker && (keyEvent.Keycode == Key.F || keyEvent.Keycode == Key.M || keyEvent.Keycode == Key.L || keyEvent.Keycode == Key.R))
                     {
-                        if (selectedUnit.Faction != Faction.Player)
+                        if (!CanControlFaction(selectedUnit.Faction))
                         {
                             if (keyEvent.Keycode == Key.R) return;
                             GD.Print("[Control] Cannot command other factions' workers!");
@@ -1166,21 +1419,14 @@ public partial class MapRenderer : TileMapLayer
                 break;
 
             case "end_turn":
-                _sim.EndTurn();
-                GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
-                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
-                if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
-                {
-                    _selectedUnitId = null;
-                }
-                UpdateUiAfterAction();
+                ExecuteEndTurn();
                 break;
 
             case "settle":
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Type == UnitType.Settler && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && selectedUnit.Type == UnitType.Settler && CanControlFaction(selectedUnit.Faction))
                     {
                         if (_sim.CanBuildCity(selectedUnit))
                         {
@@ -1216,7 +1462,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Type == UnitType.Worker && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && selectedUnit.Type == UnitType.Worker && CanControlFaction(selectedUnit.Faction))
                     {
                         if (selectedUnit.IsWorkerBuilding() || !selectedUnit.HasMovementRemaining()) return;
                         TileImprovement? imp = actionType switch
@@ -1302,7 +1548,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         selectedUnit.IsFortified = true;
                         selectedUnit.RemainingMovement = 0;
@@ -1316,7 +1562,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         selectedUnit.IsSleeping = true;
                         selectedUnit.RemainingMovement = 0;
@@ -1330,7 +1576,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         selectedUnit.IsFortified = false;
                         selectedUnit.IsSleeping = false;
@@ -1346,7 +1592,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         selectedUnit.IsSentry = true;
                         selectedUnit.RemainingMovement = 0;
@@ -1360,7 +1606,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         if (_sim.UpgradeUnit(selectedUnit))
                         {
@@ -1375,7 +1621,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         if (_sim.ExecutePillage(selectedUnit))
                         {
@@ -1392,7 +1638,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction))
                     {
                         selectedUnit.IsAutomated = true;
                         selectedUnit.RemainingMovement = 0;
@@ -1406,7 +1652,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.LoadedUnitIds.Count > 0)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.LoadedUnitIds.Count > 0)
                     {
                         var cargoId = selectedUnit.LoadedUnitIds.First();
                         var cargo = _sim.Units.Find(u => u.Id == cargoId);
@@ -1416,7 +1662,7 @@ public partial class MapRenderer : TileMapLayer
                             int[] dys = { 1, 0, -1, 0, 1, 1, -1, -1 };
                             for (int i = 0; i < 8; i++)
                             {
-                                int tx = selectedUnit.X + dxs[i];
+                                int tx = _sim.Map.NormalizeX(selectedUnit.X + dxs[i]);
                                 int ty = selectedUnit.Y + dys[i];
                                 if (_sim.Map.IsInBounds(tx, ty))
                                 {
@@ -1442,9 +1688,9 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Land)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Domain == UnitDomain.Land)
                     {
-                        var transport = _sim.Units.Find(u => u.Faction == selectedUnit.Faction && u.CanBoardTransport(selectedUnit) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= 1);
+                        var transport = _sim.Units.Find(u => u.Faction == selectedUnit.Faction && u.CanBoardTransport(selectedUnit, _sim) && _sim.Map.GetChebyshevDistance(u.X, u.Y, selectedUnit.X, selectedUnit.Y) <= 1);
                         if (transport != null)
                         {
                             if (_sim.LoadUnitIntoTransport(selectedUnit, transport))
@@ -1462,7 +1708,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Type == UnitType.GreatLeader)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Type == UnitType.GreatLeader)
                     {
                         if (_sim.CreateArmy(selectedUnit))
                         {
@@ -1477,7 +1723,7 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Type == UnitType.GreatLeader)
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Type == UnitType.GreatLeader)
                     {
                         var city = _sim.Cities.Find(c => c.X == selectedUnit.X && c.Y == selectedUnit.Y && c.Faction == selectedUnit.Faction);
                         if (city != null)
@@ -1496,42 +1742,9 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.BombardRange > 0 && selectedUnit.HasMovementRemaining())
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.BombardRange > 0 && selectedUnit.HasMovementRemaining())
                     {
-                        Unit? bestTarget = null;
-                        int bestDef = -1;
-                        for (int dx = -selectedUnit.BombardRange; dx <= selectedUnit.BombardRange; dx++)
-                        {
-                            for (int dy = -selectedUnit.BombardRange; dy <= selectedUnit.BombardRange; dy++)
-                            {
-                                int tx = selectedUnit.X + dx;
-                                int ty = selectedUnit.Y + dy;
-                                if (Math.Max(Math.Abs(dx), Math.Abs(dy)) <= selectedUnit.BombardRange && Math.Max(Math.Abs(dx), Math.Abs(dy)) > 0 && _sim.Map.IsInBounds(tx, ty))
-                                {
-                                    var enemy = _sim.Units.FirstOrDefault(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && _sim.IsHostile(selectedUnit, u));
-                                    if (enemy != null && (int)enemy.DefenseStrength > bestDef)
-                                    {
-                                        bestDef = (int)enemy.DefenseStrength;
-                                        bestTarget = enemy;
-                                    }
-                                }
-                            }
-                        }
-                        if (bestTarget != null)
-                        {
-                            _sim.ExecuteBombard(selectedUnit, bestTarget.X, bestTarget.Y);
-                            GD.Print($"[Bombard] {selectedUnit.Type} bombarded {bestTarget.Type} at ({bestTarget.X}, {bestTarget.Y})!");
-                        }
-                        else
-                        {
-                            var enemyCity = _sim.Cities.FirstOrDefault(c => c.Faction != selectedUnit.Faction && _sim.IsHostileToFaction(selectedUnit.Faction, c.Faction) && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.BombardRange);
-                            if (enemyCity != null)
-                            {
-                                _sim.ExecuteBombard(selectedUnit, enemyCity.X, enemyCity.Y);
-                                GD.Print($"[Bombard] {selectedUnit.Type} bombarded {enemyCity.Name} at ({enemyCity.X}, {enemyCity.Y})!");
-                            }
-                        }
-                        UpdateUiAfterAction();
+                        StartTargetingMode("bombard", selectedUnit);
                     }
                 }
                 break;
@@ -1540,24 +1753,9 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
                     {
-                        Unit? airTarget = _sim.Units.FirstOrDefault(u => u.TransportUnitId == null && _sim.IsHostile(selectedUnit, u) && Math.Max(Math.Abs(u.X - selectedUnit.X), Math.Abs(u.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange);
-                        if (airTarget != null)
-                        {
-                            _sim.ExecuteAirStrike(selectedUnit, airTarget.X, airTarget.Y);
-                            GD.Print($"[Air Strike] {selectedUnit.Type} struck {airTarget.Type} at ({airTarget.X}, {airTarget.Y})!");
-                        }
-                        else
-                        {
-                            var enemyCity = _sim.Cities.FirstOrDefault(c => c.Faction != selectedUnit.Faction && _sim.IsHostileToFaction(selectedUnit.Faction, c.Faction) && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange);
-                            if (enemyCity != null)
-                            {
-                                _sim.ExecuteAirStrike(selectedUnit, enemyCity.X, enemyCity.Y);
-                                GD.Print($"[Air Strike] {selectedUnit.Type} struck {enemyCity.Name} at ({enemyCity.X}, {enemyCity.Y})!");
-                            }
-                        }
-                        UpdateUiAfterAction();
+                        StartTargetingMode("air_strike", selectedUnit);
                     }
                 }
                 break;
@@ -1566,13 +1764,9 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
                     {
-                        int rx = Math.Clamp(selectedUnit.X + selectedUnit.OperationalRange / 2, 0, _sim.Map.Width - 1);
-                        int ry = Math.Clamp(selectedUnit.Y, 0, _sim.Map.Height - 1);
-                        _sim.ExecuteAirRecon(selectedUnit, rx, ry);
-                        _fogRenderer.UpdateFog(_sim);
-                        UpdateUiAfterAction();
+                        StartTargetingMode("air_recon", selectedUnit);
                     }
                 }
                 break;
@@ -1581,23 +1775,22 @@ public partial class MapRenderer : TileMapLayer
                 if (!string.IsNullOrEmpty(_selectedUnitId))
                 {
                     Unit? selectedUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
-                    if (selectedUnit != null && selectedUnit.Faction == Faction.Player && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
+                    if (selectedUnit != null && CanControlFaction(selectedUnit.Faction) && selectedUnit.Domain == UnitDomain.Air && selectedUnit.HasMovementRemaining())
                     {
-                        var targetBase = _sim.Cities.FirstOrDefault(c => (c.X != selectedUnit.X || c.Y != selectedUnit.Y) && c.Faction == selectedUnit.Faction && Math.Max(Math.Abs(c.X - selectedUnit.X), Math.Abs(c.Y - selectedUnit.Y)) <= selectedUnit.OperationalRange * 2);
-                        if (targetBase != null)
-                        {
-                            _sim.ExecuteAirRebase(selectedUnit, targetBase.X, targetBase.Y);
-                        }
-                        UpdateUiAfterAction();
+                        StartTargetingMode("air_rebase", selectedUnit);
                     }
                 }
+                break;
+
+            case "cancel_targeting":
+                CancelTargetingMode();
                 break;
 
             case "cycle_production":
                 if (!string.IsNullOrEmpty(_selectedCityId))
                 {
                     City? selectedCity = _sim.Cities.Find(c => c.Id == _selectedCityId);
-                    if (selectedCity != null && selectedCity.Faction == Faction.Player)
+                    if (selectedCity != null && CanControlFaction(selectedCity.Faction))
                     {
                         _sim.CycleCityProduction(selectedCity);
                         GD.Print($"[Production Queue] {selectedCity.Name} changed project to: {selectedCity.CurrentProject} (Cost: {selectedCity.GetProjectCost(selectedCity.CurrentProject)} Prod)");
@@ -1642,9 +1835,163 @@ public partial class MapRenderer : TileMapLayer
         }
     }
 
+    private void StartTargetingMode(string action, Unit unit)
+    {
+        if (_sim == null || _targetingReticleRenderer == null) return;
+        if (!CanControlFaction(unit.Faction) || !unit.HasMovementRemaining()) return;
+
+        int range = action switch
+        {
+            "bombard" => unit.BombardRange,
+            "air_strike" => unit.OperationalRange,
+            "air_recon" => unit.OperationalRange,
+            "air_rebase" => unit.OperationalRange * 2,
+            _ => 0
+        };
+
+        if (range <= 0) return;
+
+        _isTargetingMode = true;
+        _targetingAction = action;
+        _targetingSourceUnitId = unit.Id;
+
+        // Clear regular movement highlight while in targeting mode
+        _highlightRenderer?.Clear();
+
+        // Activate tactical reticle layer
+        _targetingReticleRenderer.Activate(_sim, unit, action, range);
+
+        // Update hover position
+        Vector2I mouseCell = LocalToMap(GetLocalMousePosition());
+        int mx = _sim != null ? _sim.Map.NormalizeX(mouseCell.X) : mouseCell.X;
+        _targetingReticleRenderer.SetHoveredTile(mx, mouseCell.Y);
+
+        // Notify HUD
+        _hud?.SetTargetingMode(action, unit, range);
+
+        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_click.wav");
+        GD.Print($"[Targeting] Entered {action.ToUpper()} targeting mode for {unit.Type}. Range: {range}.");
+    }
+
+    private void CancelTargetingMode()
+    {
+        if (!_isTargetingMode) return;
+
+        _isTargetingMode = false;
+        _targetingAction = null;
+        _targetingSourceUnitId = null;
+
+        _targetingReticleRenderer?.Deactivate();
+
+        Unit? selUnit = _sim?.Units.Find(u => u.Id == _selectedUnitId);
+        if (_sim != null)
+        {
+            _highlightRenderer?.UpdateHighlight(_sim, selUnit);
+        }
+        _hud?.ClearTargetingMode(_sim, _selectedUnitId, _selectedCityId);
+
+        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_click.wav");
+        GD.Print("[Targeting] Targeting mode cancelled.");
+    }
+
+    private void ExecuteTargetingAction(int targetX, int targetY)
+    {
+        if (_sim == null || string.IsNullOrEmpty(_targetingSourceUnitId) || _targetingReticleRenderer == null)
+        {
+            CancelTargetingMode();
+            return;
+        }
+
+        Unit? unit = _sim.Units.Find(u => u.Id == _targetingSourceUnitId);
+        if (unit == null || !unit.HasMovementRemaining() || !CanControlFaction(unit.Faction))
+        {
+            CancelTargetingMode();
+            return;
+        }
+
+        if (!_targetingReticleRenderer.IsValidTarget(targetX, targetY))
+        {
+            GD.Print($"[Targeting] Invalid target at ({targetX}, {targetY})!");
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_error.wav");
+            return;
+        }
+
+        bool success = false;
+        switch (_targetingAction)
+        {
+            case "bombard":
+                success = _sim.ExecuteBombard(unit, targetX, targetY);
+                if (success)
+                {
+                    GD.Print($"[Bombard] {unit.Type} bombarded ({targetX}, {targetY})!");
+                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/combat_hit.wav");
+                }
+                break;
+
+            case "air_strike":
+                success = _sim.ExecuteAirStrike(unit, targetX, targetY);
+                if (success)
+                {
+                    GD.Print($"[Air Strike] {unit.Type} struck ({targetX}, {targetY})!");
+                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/combat_hit.wav");
+                }
+                break;
+
+            case "air_recon":
+                success = _sim.ExecuteAirRecon(unit, targetX, targetY);
+                if (success)
+                {
+                    GD.Print($"[Air Recon] {unit.Type} reconnoitered ({targetX}, {targetY})!");
+                }
+                break;
+
+            case "air_rebase":
+                success = _sim.ExecuteAirRebase(unit, targetX, targetY);
+                if (success)
+                {
+                    GD.Print($"[Air Rebase] {unit.Type} rebased to ({targetX}, {targetY})!");
+                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                }
+                break;
+        }
+
+        CancelTargetingMode();
+        UpdateUiAfterAction();
+    }
+
+    private void HandleCityCapturePrompt(City city, Unit capturingUnit)
+    {
+        GD.Print($"[City Capture] Prompting player decision for {city.Name}...");
+        var dialog = new CityCaptureDialog(_sim!, city, capturingUnit);
+        dialog.OnChoiceMade += (choice) =>
+        {
+            _sim?.ApplyCityCaptureChoice(city, capturingUnit, choice);
+            _cityCaptureDialog = null;
+            UpdateUiAfterAction();
+            if (choice == CityCaptureChoice.Raze)
+            {
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/combat_hit.wav");
+            }
+            else
+            {
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+            }
+        };
+        _cityCaptureDialog = dialog;
+        GetParent().CallDeferred(Node.MethodName.AddChild, dialog);
+    }
+
     private void UpdateUiAfterAction()
     {
         if (_sim == null || _unitRenderer == null || _fogRenderer == null) return;
+        if (!string.IsNullOrEmpty(_selectedCityId) && !_sim.Cities.Any(c => c.Id == _selectedCityId))
+        {
+            _selectedCityId = null;
+        }
+        if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
+        {
+            _selectedUnitId = null;
+        }
         _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
         _fogRenderer.UpdateFog(_sim);
         _borderRenderer?.UpdateBorders(_sim);

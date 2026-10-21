@@ -40,6 +40,11 @@ public class UnitSaveDto
     public int ConstructionTurnsRemaining { get; set; }
     public bool IsFortified { get; set; }
     public bool IsSleeping { get; set; }
+    public bool IsSentry { get; set; }
+    public ExperienceLevel Experience { get; set; } = ExperienceLevel.Regular;
+    public string? TransportUnitId { get; set; }
+    public List<string> LoadedUnitIds { get; set; } = new();
+    public bool HasGeneratedLeader { get; set; }
 }
 
 public class CitySaveDto
@@ -63,6 +68,9 @@ public class CitySaveDto
     public string? CivilizationId { get; set; }
     public bool IsCapital { get; set; }
     public int AccumulatedCulture { get; set; }
+    public List<SpecialistType> Specialists { get; set; } = new();
+    public int DisorderTurns { get; set; }
+    public bool IsWLTKD { get; set; }
 }
 
 public class SaveDataDto
@@ -72,10 +80,36 @@ public class SaveDataDto
     public GameEndState EndState { get; set; }
     public string PlayerCivId { get; set; } = "rome";
     public string AiCivId { get; set; } = "babylon";
+    public DifficultyLevel Difficulty { get; set; } = DifficultyLevel.Regent;
+
+    // Government & Revolution
+    public GovernmentType PlayerGovernment { get; set; } = GovernmentType.Despotism;
+    public GovernmentType AiGovernment { get; set; } = GovernmentType.Despotism;
+    public GovernmentType? PendingGovernment { get; set; } = null;
+    public int AnarchyTurnsRemaining { get; set; } = 0;
+
+    // Golden Age
+    public bool PlayerGoldenAgeIsActive { get; set; }
+    public int PlayerGoldenAgeTurnsRemaining { get; set; }
+    public bool PlayerGoldenAgeHasBeenUsed { get; set; }
+    public bool AiGoldenAgeIsActive { get; set; }
+    public int AiGoldenAgeTurnsRemaining { get; set; }
+    public bool AiGoldenAgeHasBeenUsed { get; set; }
+
+    // War Weariness
+    public int WarWearinessPoints { get; set; }
+    public int WarStartTurn { get; set; } = -1;
+    public bool IsDefensiveWar { get; set; }
+    public int PeaceTurns { get; set; }
+
+    // Diplomacy & Espionage
+    public List<string> Embassies { get; set; } = new();
+    public List<string> Spies { get; set; } = new();
     
     // Economy and Treasury
     public int PlayerTreasury { get; set; }
     public int PlayerTaxRate { get; set; }
+    public int PlayerEntertainmentRate { get; set; }
     public int LastTurnIncome { get; set; }
     public int LastTurnMaintenance { get; set; }
     public int LastTurnScience { get; set; }
@@ -103,4 +137,14 @@ public class SaveDataDto
     // Histograph data
     public List<HistographEntry> PlayerHistograph { get; set; } = new();
     public List<HistographEntry> AiHistograph { get; set; } = new();
+
+    // Multiplayer Support
+    public GameMode Mode { get; set; } = GameMode.SinglePlayer;
+    public Faction ActiveTurnFaction { get; set; } = Faction.Player;
+    public string Player1Name { get; set; } = "Player 1";
+    public string Player2Name { get; set; } = "Player 2";
+    public List<int> Player2VisibilityGridFlat { get; set; } = new();
+    public int AiTreasury { get; set; }
+    public int AiTaxRate { get; set; } = 50;
+    public int AiEntertainmentRate { get; set; } = 0;
 }

@@ -587,28 +587,28 @@ public partial class GameHud : CanvasLayer
     {
         _sim = sim;
 
-        // Dynamically load selected player civilization icon
-        if (_civIconRect != null && _civIconRect.Texture == null)
+        // Dynamically load active turn civilization icon
+        if (_civIconRect != null)
         {
-            string path = $"res://assets/leaders/{sim.PlayerCivId}.png";
+            string path = $"res://assets/leaders/{sim.ActiveCiv.Id}.png";
             if (ResourceLoader.Exists(path))
             {
                 _civIconRect.Texture = GD.Load<Texture2D>(path);
-                _civIconRect.TooltipText = $"{sim.PlayerCiv.Name} ({sim.PlayerCiv.LeaderName})";
+                _civIconRect.TooltipText = $"{sim.ActiveCiv.Name} ({sim.ActiveCiv.LeaderName}) - {sim.ActivePlayerName}";
             }
         }
         
         // Update government button to show anarchy or current government
         if (_govButton != null)
         {
-            if (sim.IsInAnarchy)
+            if (sim.IsInAnarchy && sim.ActiveTurnFaction == Faction.Player)
             {
                 _govButton.Text = $"⚠ ANARCHY ({sim.AnarchyTurnsRemaining})";
                 _govButton.AddThemeColorOverride("font_color", new Color(1.0f, 0.3f, 0.3f));
             }
             else
             {
-                var gov = Government.Get(sim.PlayerGovernment);
+                var gov = Government.Get(sim.GetGovernment(sim.ActiveTurnFaction));
                 _govButton.Text = $"⚖ {gov.Name}";
                 _govButton.RemoveThemeColorOverride("font_color");
             }
@@ -684,7 +684,7 @@ public partial class GameHud : CanvasLayer
             Unit? unit = sim.Units.Find(u => u.Id == selectedUnitId);
             if (unit != null)
             {
-                string factionStr = unit.Faction == Faction.Player ? "" : $" [{unit.Faction}]";
+                string factionStr = unit.Faction == sim.ActiveTurnFaction ? "" : $" [{unit.Faction}]";
                 string statusStr = "";
                 if (unit.IsSleeping) statusStr = " | Status: SLEEPING";
                 else if (unit.IsFortified) statusStr = " | Status: FORTIFIED (+25% Defense)";
@@ -722,8 +722,8 @@ public partial class GameHud : CanvasLayer
 
                 _detailsLabel.Text = details;
 
-                // Populate action buttons if player unit
-                if (unit.Faction == Faction.Player && _actionsBox != null)
+                // Populate action buttons if active turn faction unit
+                if (unit.Faction == sim.ActiveTurnFaction && _actionsBox != null)
                 {
                     if (unit.IsSleeping || unit.IsFortified)
                     {
@@ -832,7 +832,7 @@ public partial class GameHud : CanvasLayer
                             // Land unit Board Transport (Sea or Army)
                             if (unit.Domain == UnitDomain.Land && unit.HasMovementRemaining())
                             {
-                                var adjTransport = sim.Units.Find(u => u.Faction == unit.Faction && u.CanBoardTransport(unit) && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 1);
+                                var adjTransport = sim.Units.Find(u => u.Faction == unit.Faction && u.CanBoardTransport(unit, sim) && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 1);
                                 if (adjTransport != null)
                                 {
                                     string verb = adjTransport.Type == UnitType.Army ? "Join Army" : "Board Ship";
@@ -922,7 +922,7 @@ public partial class GameHud : CanvasLayer
             City? city = sim.Cities.Find(c => c.Id == selectedCityId);
             if (city != null)
             {
-                string factionStr = city.Faction == Faction.Player ? "" : $" [{city.Faction}]";
+                string factionStr = city.Faction == sim.ActiveTurnFaction ? "" : $" [{city.Faction}]";
                 string projectInfo = city.CurrentProject == ProductionProject.None 
                     ? $"Idle (Stored Prod: {city.StoredProduction})" 
                     : $"{city.CurrentProject.ToString().ToUpper()} ({city.CurrentProductionProgress}/{city.GetProjectCost(city.CurrentProject)} Prod)";
@@ -945,8 +945,8 @@ public partial class GameHud : CanvasLayer
                                      $"Active Queue: {projectInfo}\n" +
                                      $"Buildings: {buildingsList}";
 
-                // Populate action button for player city
-                if (city.Faction == Faction.Player && _actionsBox != null)
+                // Populate action button for active turn faction city
+                if (city.Faction == sim.ActiveTurnFaction && _actionsBox != null)
                 {
                     var btn = CreateActionButton("🔄", "Cycle Project", "P", () => OnActionTriggered?.Invoke("cycle_production"), new Color(0.15f, 0.15f, 0.35f));
                     _actionsBox.AddChild(btn);
@@ -956,15 +956,84 @@ public partial class GameHud : CanvasLayer
         }
 
         // 3. No selection (Empire Summary)
-        int empCitiesCount = sim.Cities.Count(c => c.Faction == Faction.Player);
-        int empPop = sim.Cities.Where(c => c.Faction == Faction.Player).Sum(c => c.Population);
-        int empUnitsCount = sim.Units.Count(u => u.Faction == Faction.Player);
-        string diplStr = sim.IsAtWarWithAi ? "🔴 WAR WITH AI RIVAL" : "Peace with AI Rival";
+        var activeFaction = sim.ActiveTurnFaction;
+        int empCitiesCount = sim.Cities.Count(c => c.Faction == activeFaction);
+        int empPop = sim.Cities.Where(c => c.Faction == activeFaction).Sum(c => c.Population);
+        int empUnitsCount = sim.Units.Count(u => u.Faction == activeFaction);
+        int empTreasury = sim.GetTreasury(activeFaction);
+        var activeResearch = sim.GetResearch(activeFaction);
 
-        _detailsLabel.Text = $"--- EMPIRE SUMMARY: {sim.PlayerCiv.Name.ToUpper()} ({sim.PlayerCiv.LeaderName.ToUpper()}) (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit} - {TurnTimeline.GetFormattedYear(sim.TurnNumber)}) ---\n" +
-                             $"Diplomacy: {diplStr}  |  Cities: {empCitiesCount} (Total Pop: {empPop})  |  Active Units: {empUnitsCount}\n" +
-                             $"Research: {sim.Research.GetResearchStatusString()}\n" +
-                             $"Tip: Press [SPACE] or click END TURN to finish your turn and restore movement points.";
+        string modeTag = sim.Mode switch
+        {
+            GameMode.Hotseat => $"[HOTSEAT: {sim.ActivePlayerName} ({sim.ActiveCiv.Name})] ",
+            GameMode.NetworkHost => $"[ONLINE HOST: {sim.ActivePlayerName} ({sim.ActiveCiv.Name})] ",
+            GameMode.NetworkClient => $"[ONLINE CLIENT: {sim.ActivePlayerName} ({sim.ActiveCiv.Name})] ",
+            _ => ""
+        };
+
+        string diplStr = sim.Mode == GameMode.SinglePlayer
+            ? (sim.IsAtWarWithAi ? "🔴 WAR WITH AI RIVAL" : "Peace with AI Rival")
+            : (sim.IsAtWarWithAi ? "🔴 WAR BETWEEN PLAYERS" : "🕊️ Peace");
+
+        _detailsLabel.Text = $"{modeTag}--- EMPIRE SUMMARY: {sim.ActiveCiv.Name.ToUpper()} ({sim.ActivePlayerName.ToUpper()}) (Turn {sim.TurnNumber}/{GameSimulation.MaxTurnLimit} - {TurnTimeline.GetFormattedYear(sim.TurnNumber)}) ---\n" +
+                             $"Diplomacy: {diplStr}  |  Gold: {empTreasury}g  |  Cities: {empCitiesCount} (Pop: {empPop})  |  Active Units: {empUnitsCount}\n" +
+                             $"Research: {activeResearch.GetResearchStatusString()}\n" +
+                             $"Tip: Press [SPACE] or click END TURN to finish your turn and pass play.";
+    }
+
+    public void SetTargetingMode(string action, Unit unit, int range)
+    {
+        if (_actionsBox == null) return;
+        foreach (var child in _actionsBox.GetChildren())
+        {
+            child.QueueFree();
+        }
+
+        var banner = new VBoxContainer
+        {
+            Alignment = BoxContainer.AlignmentMode.Center,
+            CustomMinimumSize = new Vector2(160, 50)
+        };
+
+        string actionTitle = action switch
+        {
+            "bombard" => "💥 BOMBARD TARGETING",
+            "air_strike" => "🎯 AIR STRIKE TARGETING",
+            "air_recon" => "🔭 RECONNAISSANCE",
+            "air_rebase" => "🛬 RE-BASE MISSION",
+            _ => "🎯 TARGETING MODE"
+        };
+
+        var titleLabel = new Label
+        {
+            Text = actionTitle,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        titleLabel.AddThemeFontSizeOverride("font_size", 12);
+        titleLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.85f, 0.2f));
+        banner.AddChild(titleLabel);
+
+        var infoLabel = new Label
+        {
+            Text = $"Range: {range} | LMB: Fire",
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        infoLabel.AddThemeFontSizeOverride("font_size", 11);
+        infoLabel.AddThemeColorOverride("font_color", new Color(0.85f, 0.85f, 0.85f));
+        banner.AddChild(infoLabel);
+
+        _actionsBox.AddChild(banner);
+
+        var cancelBtn = CreateActionButton("✕", "Cancel", "Esc", () => OnActionTriggered?.Invoke("cancel_targeting"), new Color(0.65f, 0.18f, 0.18f));
+        _actionsBox.AddChild(cancelBtn);
+    }
+
+    public void ClearTargetingMode(GameSimulation? sim, string? selectedUnitId, string? selectedCityId)
+    {
+        if (sim != null)
+        {
+            Refresh(sim, selectedUnitId, selectedCityId);
+        }
     }
 
     private Button CreateActionButton(string icon, string actionName, string hotkey, Action action, Color bg)

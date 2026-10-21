@@ -65,6 +65,20 @@ public partial class CityCitizensComponent : PanelContainer
                 onCitizensChanged?.Invoke();
             }));
         }
+        // Draft Button
+        if (city.Faction == Faction.Player && city.CanDraft(sim))
+        {
+            var sep = new VSeparator();
+            hbox.AddChild(sep);
+
+            var draftBtn = new Button { Text = "Draft", TooltipText = "Draft a citizen into military service (Consumes 1 Pop, adds Unhappiness)", MouseDefaultCursorShape = CursorShape.PointingHand };
+            draftBtn.AddThemeColorOverride("font_color", new Color(0.8f, 0.3f, 0.3f));
+            draftBtn.Pressed += () => {
+                city.Draft(sim);
+                onCitizensChanged?.Invoke();
+            };
+            hbox.AddChild(draftBtn);
+        }
     }
 
     private Control createCitizenHead(string text, string tooltip, Color color, Action onClick = null)

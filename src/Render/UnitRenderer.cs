@@ -88,7 +88,7 @@ public partial class UnitRenderer : Node2D
             // Opposing stealth units (e.g. Submarines) are invisible unless detected by sonar/detectors
             if (unit.IsStealth && unit.Faction != Faction.Player)
             {
-                bool detected = sim.Units.Any(u => u.Faction == Faction.Player && u.DetectsStealth && Math.Max(Math.Abs(u.X - unit.X), Math.Abs(u.Y - unit.Y)) <= 2);
+                bool detected = sim.Units.Any(u => u.Faction == Faction.Player && u.DetectsStealth && sim.Map.GetChebyshevDistance(u.X, u.Y, unit.X, unit.Y) <= 2);
                 if (!detected) continue;
             }
 
@@ -150,10 +150,18 @@ public partial class UnitRenderer : Node2D
                 {
                     if (sprite.Position != targetPos)
                     {
-                        var tween = CreateTween();
-                        tween.TweenProperty(sprite, "position", targetPos, 0.22f)
-                             .SetTrans(Tween.TransitionType.Quad)
-                             .SetEase(Tween.EaseType.Out);
+                        // If moving more than ~2 tiles (e.g. crossing cylindrical seam or rebasing), snap immediately without cross-screen slide
+                        if (sprite.Position.DistanceTo(targetPos) > 300f)
+                        {
+                            sprite.Position = targetPos;
+                        }
+                        else
+                        {
+                            var tween = CreateTween();
+                            tween.TweenProperty(sprite, "position", targetPos, 0.22f)
+                                 .SetTrans(Tween.TransitionType.Quad)
+                                 .SetEase(Tween.EaseType.Out);
+                        }
                     }
                 }
 
@@ -493,6 +501,7 @@ public partial class UnitRenderer : Node2D
         UnitType.Helicopter => "helicopter",
         UnitType.CruiseMissile => "cruise_missile",
         UnitType.TacticalNuke => "tactical_nuke",
+        UnitType.ICBM => "icbm",
         _ => type.ToString().ToLower()
     };
 

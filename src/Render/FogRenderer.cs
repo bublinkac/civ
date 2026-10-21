@@ -99,11 +99,12 @@ public partial class FogRenderer : TileMapLayer
     {
         Clear();
 
+        var grid = sim.GetVisibilityGrid(sim.ActiveTurnFaction);
         for (int x = 0; x < sim.Map.Width; x++)
         {
             for (int y = 0; y < sim.Map.Height; y++)
             {
-                FogState state = sim.VisibilityGrid[x, y];
+                FogState state = grid[x, y];
                 if (state == FogState.Unexplored)
                 {
                     SetCell(new Vector2I(x, y), sourceId: (int)FogState.Unexplored, atlasCoords: new Vector2I(0, 0));
