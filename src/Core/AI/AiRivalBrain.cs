@@ -116,11 +116,12 @@ public static class AiRivalBrain
     /// Processes the complete turn for the AI Rival faction.
     /// Executes city production planning and triggers unit task automation.
     /// </summary>
-    public static void ProcessTurn(GameSimulation sim)
+    public static void ProcessTurn(GameSimulation sim, Faction faction = Faction.AiRival)
     {
-        var leader = GetStrategy(sim.AiCiv.LeaderName);
-        var aiCities = sim.Cities.Where(c => c.Faction == Faction.AiRival).ToList();
-        var aiUnits = sim.Units.Where(u => u.Faction == Faction.AiRival).ToList();
+        var civ = sim.GetCivilization(faction);
+        var leader = GetStrategy(civ.LeaderName);
+        var aiCities = sim.Cities.Where(c => c.Faction == faction).ToList();
+        var aiUnits = sim.Units.Where(u => u.Faction == faction).ToList();
 
         // 1. Plan City Productions
         foreach (var city in aiCities)
@@ -175,10 +176,10 @@ public static class AiRivalBrain
 
         // Check if under immediate threat (enemy unit within 3 tiles)
         bool underThreat = false;
-        var playerUnits = sim.Units.Where(u => u.Faction == Faction.Player).ToList();
-        foreach (var pUnit in playerUnits)
+        var enemyUnits = sim.Units.Where(u => u.Faction != city.Faction && (u.Faction.IsBarbarian() || sim.IsAtWar(city.Faction, u.Faction))).ToList();
+        foreach (var eUnit in enemyUnits)
         {
-            int dist = sim.Map.GetChebyshevDistance(pUnit.X, pUnit.Y, city.X, city.Y);
+            int dist = sim.Map.GetChebyshevDistance(eUnit.X, eUnit.Y, city.X, city.Y);
             if (dist <= 3)
             {
                 underThreat = true;
@@ -256,8 +257,8 @@ public static class AiRivalBrain
         // Priority 1b: Coastal city naval fleet planning (Transports and Escort Warships)
         if (city.IsCoastal(sim.Map))
         {
-            int aiTransports = sim.Units.Count(u => u.Faction == Faction.AiRival && u.IsNavalUnit && u.TransportCapacity > 0);
-            bool playerAcrossWater = sim.Cities.Any(c => c.Faction == Faction.Player && !sim.Map.AreOnSameContinent(city.X, city.Y, c.X, c.Y));
+            int aiTransports = sim.Units.Count(u => u.Faction == city.Faction && u.IsNavalUnit && u.TransportCapacity > 0);
+            bool playerAcrossWater = sim.Cities.Any(c => c.Faction != city.Faction && (c.Faction == Faction.Player || sim.IsAtWar(city.Faction, c.Faction)) && !sim.Map.AreOnSameContinent(city.X, city.Y, c.X, c.Y));
 
             if (playerAcrossWater && aiTransports == 0 && city.Population >= 2)
             {
@@ -266,8 +267,9 @@ public static class AiRivalBrain
                 return;
             }
 
-            int aiWarships = sim.Units.Count(u => u.Faction == Faction.AiRival && u.IsNavalUnit && u.TransportCapacity == 0 && u.AttackStrength > 0);
-            if (aiWarships < 2 && (sim.IsAtWarWithAi || aiTransports > 0))
+            int aiWarships = sim.Units.Count(u => u.Faction == city.Faction && u.IsNavalUnit && u.TransportCapacity == 0 && u.AttackStrength > 0);
+            bool isAtAnyWar = sim.ActiveWars.Any(w => w.Item1 == city.Faction || w.Item2 == city.Faction);
+            if (aiWarships < 2 && (isAtAnyWar || aiTransports > 0))
             {
                 city.CurrentProject = GetBestNavalWarship(city, sim);
                 Console.WriteLine($"[Naval AI] Coastal city {city.Name} constructing naval warship: {city.CurrentProject}!");
@@ -276,8 +278,8 @@ public static class AiRivalBrain
         }
 
         // Priority 2: Rapid early expansion (REX) - Spawn Settler if criteria met
-        int aiSettlers = sim.Units.Count(u => u.Faction == Faction.AiRival && u.Type == UnitType.Settler);
-        int totalAiCities = sim.Cities.Count(c => c.Faction == Faction.AiRival);
+        int aiSettlers = sim.Units.Count(u => u.Faction == city.Faction && u.Type == UnitType.Settler);
+        int totalAiCities = sim.Cities.Count(c => c.Faction == city.Faction);
 
         if (city.Population >= 2 && aiSettlers == 0 && totalAiCities < 4)
         {
@@ -546,8 +548,8 @@ public static class AiRivalBrain
     {
         if (worker.IsWorkerBuilding()) return;
 
-        // Find nearest AI city
-        var aiCities = sim.Cities.Where(c => c.Faction == Faction.AiRival).ToList();
+        // Find nearest city of worker's faction
+        var aiCities = sim.Cities.Where(c => c.Faction == worker.Faction).ToList();
         if (aiCities.Count == 0) return;
 
         City nearestCity = aiCities[0];
@@ -714,15 +716,16 @@ public static class AiRivalBrain
             return;
         }
 
-        // 2. If at war, march towards the closest player city or unit!
-        if (sim.IsAtWarWithAi || leader.AggressionLevel >= 4)
+        // 2. If at war, march towards the closest enemy city or unit!
+        bool atWar = sim.ActiveWars.Any(w => w.Item1 == military.Faction || w.Item2 == military.Faction);
+        if (atWar || leader.AggressionLevel >= 4)
         {
-            // Find closest player city
+            // Find closest enemy city
             City? targetCity = null;
             int minCityDist = int.MaxValue;
-            var playerCities = sim.Cities.Where(c => c.Faction == Faction.Player).ToList();
+            var enemyCities = sim.Cities.Where(c => c.Faction != military.Faction && (c.Faction == Faction.Player || sim.IsAtWar(military.Faction, c.Faction))).ToList();
 
-            foreach (var city in playerCities)
+            foreach (var city in enemyCities)
             {
                 int dist = sim.Map.GetChebyshevDistance(city.X, city.Y, military.X, military.Y);
                 if (dist < minCityDist)
@@ -779,7 +782,7 @@ public static class AiRivalBrain
         // 3. Otherwise, check if undefended cities need garrison
         foreach (var city in aiCities)
         {
-            int defenders = sim.Units.Count(u => u.X == city.X && u.Y == city.Y && u.Faction == Faction.AiRival && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
+            int defenders = sim.Units.Count(u => u.X == city.X && u.Y == city.Y && u.Faction == military.Faction && (u.Type == UnitType.Warrior || u.Type == UnitType.Archer));
             if (defenders < 2)
             {
                 // We are not at this city - path to it and reinforce!
@@ -872,7 +875,7 @@ public static class AiRivalBrain
                 var other = sim.Units.FirstOrDefault(u => u.X == tx && u.Y == ty);
                 if (other != null)
                 {
-                    if (other.Faction == Faction.Barbarian || (other.Faction == Faction.Player && sim.IsAtWarWithAi))
+                    if (other.Faction.IsBarbarian() || sim.IsAtWar(unit.Faction, other.Faction))
                     {
                         return other;
                     }
@@ -963,11 +966,11 @@ public static class AiRivalBrain
         // 1. If transport has cargo, sail towards the invasion target!
         if (transport.LoadedUnitIds.Count > 0)
         {
-            var playerCities = sim.Cities.Where(c => c.Faction == Faction.Player).ToList();
+            var enemyCities = sim.Cities.Where(c => c.Faction != transport.Faction && (c.Faction == Faction.Player || sim.IsAtWar(transport.Faction, c.Faction))).ToList();
             City? targetCity = null;
             int minCityDist = int.MaxValue;
 
-            foreach (var c in playerCities)
+            foreach (var c in enemyCities)
             {
                 int dist = sim.Map.GetChebyshevDistance(c.X, c.Y, transport.X, transport.Y);
                 if (dist < minCityDist)
@@ -1150,7 +1153,7 @@ public static class AiRivalBrain
                     int ty = warship.Y + dy;
                     if (!sim.Map.IsInBounds(tx, ty)) continue;
 
-                    var enemyCity = sim.Cities.Find(c => c.X == tx && c.Y == ty && c.Faction == Faction.Player);
+                    var enemyCity = sim.Cities.Find(c => c.X == tx && c.Y == ty && c.Faction != warship.Faction && (c.Faction.IsBarbarian() || sim.IsAtWar(warship.Faction, c.Faction)));
                     var enemyUnit = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(warship, u));
                     if (enemyCity != null || enemyUnit != null)
                     {

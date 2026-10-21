@@ -6,8 +6,17 @@ namespace CivGame.Render;
 
 public partial class BorderRenderer : TileMapLayer
 {
-    private const int PlayerSourceId = 0;
-    private const int AiSourceId = 1;
+    private static readonly (Faction Faction, Color Color, string FileName)[] FactionBorderStyles = new[]
+    {
+        (Faction.Player, new Color(0.95f, 0.72f, 0.12f, 0.85f), "border.png"),
+        (Faction.AiRival, new Color(0.6f, 0.2f, 0.9f, 0.85f), "border_ai.png"),
+        (Faction.AiRival2, new Color(0.85f, 0.15f, 0.15f, 0.85f), "border_ai2.png"),
+        (Faction.AiRival3, new Color(0.1f, 0.75f, 0.8f, 0.85f), "border_ai3.png"),
+        (Faction.AiRival4, new Color(0.15f, 0.75f, 0.25f, 0.85f), "border_ai4.png"),
+        (Faction.AiRival5, new Color(0.95f, 0.50f, 0.10f, 0.85f), "border_ai5.png"),
+        (Faction.AiRival6, new Color(0.2f, 0.35f, 0.85f, 0.85f), "border_ai6.png"),
+        (Faction.AiRival7, new Color(0.85f, 0.2f, 0.6f, 0.85f), "border_ai7.png"),
+    };
 
     public override void _Ready()
     {
@@ -22,25 +31,16 @@ public partial class BorderRenderer : TileMapLayer
             TileSize = new Vector2I(256, 128)
         };
 
-        // Player border: Gold (85% alpha)
-        var goldColor = new Color(0.95f, 0.72f, 0.12f, 0.85f);
-        var playerSource = new TileSetAtlasSource
+        foreach (var style in FactionBorderStyles)
         {
-            Texture = CreateBorderTexture(goldColor, "border.png"),
-            TextureRegionSize = new Vector2I(256, 128)
-        };
-        playerSource.CreateTile(new Vector2I(0, 0));
-        tileSet.AddSource(playerSource, PlayerSourceId);
-
-        // AI border: Royal Purple (85% alpha)
-        var purpleColor = new Color(0.6f, 0.2f, 0.9f, 0.85f);
-        var aiSource = new TileSetAtlasSource
-        {
-            Texture = CreateBorderTexture(purpleColor, "border_ai.png"),
-            TextureRegionSize = new Vector2I(256, 128)
-        };
-        aiSource.CreateTile(new Vector2I(0, 0));
-        tileSet.AddSource(aiSource, AiSourceId);
+            var source = new TileSetAtlasSource
+            {
+                Texture = CreateBorderTexture(style.Color, style.FileName),
+                TextureRegionSize = new Vector2I(256, 128)
+            };
+            source.CreateTile(new Vector2I(0, 0));
+            tileSet.AddSource(source, (int)style.Faction);
+        }
 
         this.TileSet = tileSet;
     }
@@ -63,7 +63,7 @@ public partial class BorderRenderer : TileMapLayer
                         // Only render borders on explored/visible tiles
                         if (sim.VisibilityGrid[x, y] != FogState.Unexplored)
                         {
-                            int sourceId = city.Faction == Faction.AiRival ? AiSourceId : PlayerSourceId;
+                            int sourceId = (int)city.Faction;
                             SetCell(new Vector2I(x, y), sourceId: sourceId, atlasCoords: new Vector2I(0, 0));
                         }
                     }

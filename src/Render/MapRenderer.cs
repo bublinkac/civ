@@ -231,8 +231,7 @@ public partial class MapRenderer : TileMapLayer
         _sim.Mode = resolved.Mode;
         _sim.Player1Name = resolved.Player1Name;
         _sim.Player2Name = resolved.Player2Name;
-        _sim.PlayerCivId = resolved.PlayerCivId;
-        _sim.AiCivId = resolved.AiCivId;
+        _sim.ConfigureFactions(resolved.PlayerCivId, resolved.RivalCivIds);
         _sim.Difficulty = resolved.Difficulty;
         _sim.SetupInitialUnits();
         _sim.OnHotseatTurnChange += OnHotseatTurnChange;

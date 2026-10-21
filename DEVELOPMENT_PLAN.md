@@ -43,7 +43,19 @@ This document serves as an overview of achieved progress and a high-level plan f
 - Parameterized **Water Coverage** (60% Water, 70% Water, 80% Water) affecting procedural sea/coast boundaries.
 - Parameterized **Geological Age** (3 Billion [rugged mountains/abundant hills/25% volcano chance], 4 Billion [normal], 5 Billion [highly eroded/rare mountains/5% volcano chance]).
 - Parameterized **Climate** (Arid [moisture penalty, expanding deserts/plains], Normal, Wet [moisture bonus, expanding grass/forests/jungles]).
-- Parameterized **Temperature** (Warm [smaller tundra, wider equatorial jungles], Temperate, Cold [wider tundra, smaller jungles]).
+### 21. Multi-Civilization Free-For-All (FFA) Support (COMPLETED)
+- Extended game simulation from 1vs1 to up to 8 civilizations (Player + 1 to 7 AI rivals).
+- Added `Faction.AiRival2` through `Faction.AiRival7` with helper extension methods (`IsPlayer()`, `IsBarbarian()`, `IsAi()`).
+- Added rival count selector ("1 Rival (1v1)" to "7 Rivals (8 Civs Max)") in the Main Menu with `GameSetupOptions.NumberOfRivals`.
+- Multi-faction start position placement algorithm distributing civilizations radially around the world map with distance constraints.
+- Extended `GameSimulation` multi-faction state: per-faction visibility grids, research tracking, treasury, tax/luxuries rates, governments, golden ages, and spaceship components.
+- Autonomous AI turns in `AiRivalBrain` running for all active AI rivals independently with threat assessment, city planning, worker tasks, and military expansion.
+- `BorderRenderer` with 8 distinct territorial border colors (Gold, Royal Purple, Crimson Red, Cyan, Emerald Green, Orange, Navy Blue, Magenta).
+- `UnitRenderer` with distinctive color tinting per faction.
+- `ForeignAdvisorPanel` dynamically displaying all active rivals, their war/peace status, and diplomacy/espionage interactions.
+- `HistographPanel` and `DemographicsData` tracking and charting all active civilizations.
+- Complete backward compatibility for existing 1vs1 save files and game modes.
+
 
 ---
 

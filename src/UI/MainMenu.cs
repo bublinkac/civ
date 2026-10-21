@@ -50,6 +50,7 @@ public partial class MainMenu : CanvasLayer
     private OptionButton? _climateInput;
     private OptionButton? _tempInput;
     private OptionButton? _difficultyInput;
+    private OptionButton? _rivalsInput;
 
     // Containers for different screens
     private Control? _titleScreenContainer;
@@ -423,6 +424,32 @@ public partial class MainMenu : CanvasLayer
         _aiCivInput.AddThemeFontSizeOverride("font_size", 13);
         civHBox.AddChild(_aiCivInput);
 
+        var rivalsCountLabel = new Label();
+        rivalsCountLabel.Text = "Count:";
+        rivalsCountLabel.AddThemeFontSizeOverride("font_size", 14);
+        rivalsCountLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.72f, 0.12f));
+        civHBox.AddChild(rivalsCountLabel);
+
+        _rivalsInput = new OptionButton();
+        _rivalsInput.CustomMinimumSize = new Vector2(140, 32);
+        _rivalsInput.AddThemeFontSizeOverride("font_size", 13);
+        _rivalsInput.AddItem("1 Rival (1v1)");
+        _rivalsInput.SetItemMetadata(0, 1);
+        _rivalsInput.AddItem("2 Rivals (3 Civs)");
+        _rivalsInput.SetItemMetadata(1, 2);
+        _rivalsInput.AddItem("3 Rivals (4 Civs)");
+        _rivalsInput.SetItemMetadata(2, 3);
+        _rivalsInput.AddItem("4 Rivals (5 Civs)");
+        _rivalsInput.SetItemMetadata(3, 4);
+        _rivalsInput.AddItem("5 Rivals (6 Civs)");
+        _rivalsInput.SetItemMetadata(4, 5);
+        _rivalsInput.AddItem("6 Rivals (7 Civs)");
+        _rivalsInput.SetItemMetadata(5, 6);
+        _rivalsInput.AddItem("7 Rivals (8 Civs)");
+        _rivalsInput.SetItemMetadata(6, 7);
+        _rivalsInput.Selected = 2; // Default 3 Rivals
+        civHBox.AddChild(_rivalsInput);
+
         // Populate dropdowns with registered civilizations (with Random as index 0)
         _playerCivInput.AddItem("🎲 Random Civilization");
         _playerCivInput.SetItemMetadata(0, "random");
@@ -751,6 +778,12 @@ public partial class MainMenu : CanvasLayer
             ? (_tempInput.Selected == 3 ? "random" : _tempInput.Text.Replace(" (Tropical)", "").Replace(" (Arctic)", "")) 
             : "Temperate";
 
+        int numberOfRivals = 3;
+        if (_rivalsInput != null && _rivalsInput.Selected >= 0)
+        {
+            numberOfRivals = (int)_rivalsInput.GetItemMetadata(_rivalsInput.Selected);
+        }
+
         var setupOptions = new GameSetupOptions
         {
             Width = opt.Width,
@@ -758,6 +791,7 @@ public partial class MainMenu : CanvasLayer
             Seed = seed,
             PlayerCivId = playerCivId,
             AiCivId = aiCivId,
+            NumberOfRivals = numberOfRivals,
             WaterPercentage = waterStr,
             GeologicalAge = ageStr,
             Climate = climateStr,

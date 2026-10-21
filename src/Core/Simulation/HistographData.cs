@@ -24,14 +24,34 @@ public class HistographData
 {
     public List<HistographEntry> PlayerHistory { get; } = new();
     public List<HistographEntry> AiHistory { get; } = new();
+    public Dictionary<Faction, List<HistographEntry>> FactionHistories { get; } = new();
+
+    public List<HistographEntry> GetHistory(Faction faction)
+    {
+        if (!FactionHistories.TryGetValue(faction, out var list))
+        {
+            list = new List<HistographEntry>();
+            FactionHistories[faction] = list;
+        }
+        return list;
+    }
 
     /// <summary>
-    /// Record a snapshot of both factions' stats for the current turn.
+    /// Record a snapshot of all active factions' stats for the current turn.
     /// </summary>
     public void RecordTurn(GameSimulation sim)
     {
-        PlayerHistory.Add(CreateEntry(sim, Faction.Player));
-        AiHistory.Add(CreateEntry(sim, Faction.AiRival));
+        foreach (var f in sim.ActiveFactions)
+        {
+            var entry = CreateEntry(sim, f);
+            GetHistory(f).Add(entry);
+        }
+
+        // Backward compatibility mirrors
+        PlayerHistory.Clear();
+        PlayerHistory.AddRange(GetHistory(Faction.Player));
+        AiHistory.Clear();
+        AiHistory.AddRange(GetHistory(Faction.AiRival));
     }
 
     private static HistographEntry CreateEntry(GameSimulation sim, Faction faction)

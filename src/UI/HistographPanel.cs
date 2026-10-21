@@ -24,6 +24,22 @@ public partial class HistographPanel : PanelContainer
     private static readonly Color GridColor = new(0.4f, 0.4f, 0.4f, 0.3f);
     private static readonly Color BgDark = new(0.08f, 0.08f, 0.12f, 0.95f);
 
+    public static Color GetFactionColor(Faction faction)
+    {
+        return faction switch
+        {
+            Faction.Player   => new Color(0.2f, 0.6f, 1.0f),
+            Faction.AiRival  => new Color(0.9f, 0.3f, 0.2f),
+            Faction.AiRival2 => new Color(0.2f, 0.8f, 0.3f),
+            Faction.AiRival3 => new Color(0.95f, 0.8f, 0.1f),
+            Faction.AiRival4 => new Color(0.1f, 0.8f, 0.9f),
+            Faction.AiRival5 => new Color(0.95f, 0.5f, 0.1f),
+            Faction.AiRival6 => new Color(0.9f, 0.3f, 0.7f),
+            Faction.AiRival7 => new Color(0.8f, 0.85f, 0.9f),
+            _ => Colors.White
+        };
+    }
+
     public HistographPanel(GameSimulation sim, bool embedded = false)
     {
         _sim = sim;
@@ -94,12 +110,16 @@ public partial class HistographPanel : PanelContainer
         // --- LEGEND ---
         var legendHBox = new HBoxContainer();
         legendHBox.Alignment = BoxContainer.AlignmentMode.Center;
-        legendHBox.AddThemeConstantOverride("separation", 30);
+        legendHBox.AddThemeConstantOverride("separation", 20);
 
-        var playerLegendColor = _embedded ? PlayerColor.Darkened(0.25f) : PlayerColor;
-        var aiLegendColor = _embedded ? AiColor.Darkened(0.15f) : AiColor;
-        legendHBox.AddChild(CreateLegendItem(playerLegendColor, $"Player ({_sim.PlayerCiv.Name})"));
-        legendHBox.AddChild(CreateLegendItem(aiLegendColor, $"AI ({_sim.AiCiv.Name})"));
+        foreach (var faction in _sim.ActiveFactions)
+        {
+            var civ = _sim.GetCivilization(faction);
+            var color = GetFactionColor(faction);
+            if (_embedded) color = color.Darkened(0.2f);
+            string label = faction.IsPlayer() ? $"You ({civ.Name})" : civ.Name;
+            legendHBox.AddChild(CreateLegendItem(color, label));
+        }
 
         var legendMargin = new MarginContainer();
         legendMargin.AddThemeConstantOverride("margin_bottom", 5);
@@ -156,9 +176,7 @@ public partial class HistographPanel : PanelContainer
     {
         if (_graphArea == null || !IsInstanceValid(_graphArea)) return;
 
-        var playerData = _sim.Histograph.PlayerHistory;
-        var aiData = _sim.Histograph.AiHistory;
-
+        var playerData = _sim.Histograph.GetHistory(Faction.Player);
         if (playerData.Count < 2) return;
 
         var graphRect = _graphArea.GetGlobalRect();
@@ -174,13 +192,16 @@ public partial class HistographPanel : PanelContainer
         // Graph background
         DrawRect(new Rect2(gx, gy, gw, gh), new Color(0.05f, 0.05f, 0.08f, 0.8f));
 
-        // Find max value for Y axis scaling
+        // Find max value across all active factions for Y axis scaling
         int maxVal = 1;
-        for (int i = 0; i < playerData.Count; i++)
+        foreach (var faction in _sim.ActiveFactions)
         {
-            int pv = HistographData.GetValue(playerData[i], _currentCategory);
-            int av = i < aiData.Count ? HistographData.GetValue(aiData[i], _currentCategory) : 0;
-            maxVal = Math.Max(maxVal, Math.Max(pv, av));
+            var data = _sim.Histograph.GetHistory(faction);
+            for (int i = 0; i < data.Count; i++)
+            {
+                int val = HistographData.GetValue(data[i], _currentCategory);
+                if (val > maxVal) maxVal = val;
+            }
         }
         maxVal = (int)(maxVal * 1.1f) + 1; // 10% headroom
 
@@ -215,12 +236,16 @@ public partial class HistographPanel : PanelContainer
             }
         }
 
-        // Draw lines: Player
-        DrawDataLine(playerData, gx, gy, gw, gh, totalTurns, maxVal, PlayerColor, 2.5f);
-
-        // Draw lines: AI
-        if (aiData.Count >= 2)
-            DrawDataLine(aiData, gx, gy, gw, gh, totalTurns, maxVal, AiColor, 2.5f);
+        // Draw lines for each active faction
+        foreach (var faction in _sim.ActiveFactions)
+        {
+            var data = _sim.Histograph.GetHistory(faction);
+            if (data.Count >= 2)
+            {
+                var color = GetFactionColor(faction);
+                DrawDataLine(data, gx, gy, gw, gh, totalTurns, maxVal, color, 2.5f);
+            }
+        }
 
         // Border
         DrawRect(new Rect2(gx, gy, gw, gh), new Color(0.5f, 0.5f, 0.5f, 0.6f), false, 1.5f);

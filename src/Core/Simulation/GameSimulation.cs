@@ -47,38 +47,183 @@ public class GameSimulation
 
         public event Action<Faction>? OnHotseatTurnChange;
 
+        // Multi-Faction State
+        public List<Faction> ActiveFactions { get; } = new() { Faction.Player, Faction.AiRival };
+        public Dictionary<Faction, string> FactionCivilizations { get; } = new();
+        public Dictionary<Faction, FogState[,]> FactionVisibility { get; } = new();
+        public Dictionary<Faction, TechManager> FactionResearch { get; } = new();
+        public Dictionary<Faction, HashSet<string>> FactionResearchedTechs { get; } = new();
+        public Dictionary<Faction, string?> FactionCurrentResearch { get; } = new();
+        public Dictionary<Faction, int> FactionScienceProgress { get; } = new();
+        public Dictionary<Faction, int> FactionTreasuries { get; } = new();
+        public Dictionary<Faction, int> FactionTaxRates { get; } = new();
+        public Dictionary<Faction, int> FactionEntertainmentRates { get; } = new();
+        public Dictionary<Faction, GovernmentType> FactionGovernments { get; } = new();
+        public Dictionary<Faction, GoldenAge> FactionGoldenAges { get; } = new();
+        public Dictionary<Faction, HashSet<ProductionProject>> FactionBuiltSpaceshipParts { get; } = new();
+        public HashSet<(Faction, Faction)> ActiveWars { get; } = new();
+
+        public void ConfigureFactions(string playerCivId, List<string>? rivalCivIds = null)
+        {
+            ActiveFactions.Clear();
+            ActiveFactions.Add(Faction.Player);
+            FactionCivilizations[Faction.Player] = playerCivId;
+
+            if (rivalCivIds == null || rivalCivIds.Count == 0)
+            {
+                rivalCivIds = new List<string> { AiCivId };
+            }
+
+            int count = Math.Min(rivalCivIds.Count, 7);
+            for (int i = 0; i < count; i++)
+            {
+                Faction rivalFaction = (Faction)(2 + i);
+                ActiveFactions.Add(rivalFaction);
+                FactionCivilizations[rivalFaction] = rivalCivIds[i];
+            }
+        }
+
         public FogState[,] GetVisibilityGrid(Faction faction)
         {
-            return faction == Faction.AiRival ? Player2VisibilityGrid : VisibilityGrid;
+            if (faction == Faction.Player) return VisibilityGrid;
+            if (faction == Faction.AiRival && Mode == GameMode.Hotseat) return Player2VisibilityGrid;
+            if (!FactionVisibility.TryGetValue(faction, out var grid))
+            {
+                grid = new FogState[Map.Width, Map.Height];
+                for (int x = 0; x < Map.Width; x++)
+                    for (int y = 0; y < Map.Height; y++)
+                        grid[x, y] = FogState.Unexplored;
+                FactionVisibility[faction] = grid;
+            }
+            return grid;
         }
 
         public TechManager GetResearch(Faction faction)
         {
-            return faction == Faction.AiRival ? Player2Research : Research;
+            if (faction == Faction.Player) return Research;
+            if (faction == Faction.AiRival && Mode == GameMode.Hotseat) return Player2Research;
+            if (!FactionResearch.TryGetValue(faction, out var tm))
+            {
+                tm = new TechManager();
+                FactionResearch[faction] = tm;
+            }
+            return tm;
         }
 
-        public int GetTreasury(Faction faction) => faction == Faction.AiRival ? AiTreasury : PlayerTreasury;
+        public int GetTreasury(Faction faction) => faction == Faction.Player ? PlayerTreasury : FactionTreasuries.GetValueOrDefault(faction, 0);
         public void SetTreasury(Faction faction, int val)
         {
-            if (faction == Faction.AiRival) AiTreasury = val;
-            else PlayerTreasury = val;
+            if (faction == Faction.Player) PlayerTreasury = val;
+            else
+            {
+                FactionTreasuries[faction] = val;
+                if (faction == Faction.AiRival) AiTreasury = val;
+            }
         }
 
-        public int GetTaxRate(Faction faction) => faction == Faction.AiRival ? AiTaxRate : PlayerTaxRate;
-        public int GetEntertainmentRate(Faction faction) => faction == Faction.AiRival ? AiEntertainmentRate : PlayerEntertainmentRate;
-        public GovernmentType GetGovernment(Faction faction) => faction == Faction.AiRival ? AiGovernment : PlayerGovernment;
+        public int GetTaxRate(Faction faction) => faction == Faction.Player ? PlayerTaxRate : FactionTaxRates.GetValueOrDefault(faction, 50);
+        public int GetEntertainmentRate(Faction faction) => faction == Faction.Player ? PlayerEntertainmentRate : FactionEntertainmentRates.GetValueOrDefault(faction, 0);
+        public GovernmentType GetGovernment(Faction faction) => faction == Faction.Player ? PlayerGovernment : FactionGovernments.GetValueOrDefault(faction, GovernmentType.Despotism);
         public void SetGovernment(Faction faction, GovernmentType gov)
         {
-            if (faction == Faction.AiRival) AiGovernment = gov;
-            else PlayerGovernment = gov;
+            if (faction == Faction.Player) PlayerGovernment = gov;
+            else
+            {
+                FactionGovernments[faction] = gov;
+                if (faction == Faction.AiRival) AiGovernment = gov;
+            }
         }
 
-        public Civilization ActiveCiv => ActiveTurnFaction == Faction.AiRival ? AiCiv : PlayerCiv;
-        public string ActivePlayerName => ActiveTurnFaction == Faction.AiRival ? Player2Name : Player1Name;
+        public Civilization GetCivilization(Faction faction)
+        {
+            if (FactionCivilizations.TryGetValue(faction, out var civId) && CivilizationRegistry.All.TryGetValue(civId, out var civ))
+                return civ;
+            if (faction == Faction.Player && CivilizationRegistry.All.TryGetValue(PlayerCivId, out var pCiv))
+                return pCiv;
+            if (faction >= Faction.AiRival && CivilizationRegistry.All.TryGetValue(AiCivId, out var aCiv))
+                return aCiv;
+            return CivilizationRegistry.All["rome"];
+        }
+
+        public HashSet<string> GetResearchedTechs(Faction faction)
+        {
+            if (faction == Faction.Player) return Research.ResearchedTechIds;
+            if (!FactionResearchedTechs.TryGetValue(faction, out var set))
+            {
+                set = new HashSet<string>();
+                FactionResearchedTechs[faction] = set;
+            }
+            return set;
+        }
+
+        public GoldenAge GetGoldenAge(Faction faction)
+        {
+            if (faction == Faction.Player) return PlayerGoldenAge;
+            if (!FactionGoldenAges.TryGetValue(faction, out var ga))
+            {
+                ga = new GoldenAge();
+                FactionGoldenAges[faction] = ga;
+            }
+            return ga;
+        }
+
+        public HashSet<ProductionProject> GetBuiltSpaceshipParts(Faction faction)
+        {
+            if (faction == Faction.Player) return BuiltSpaceshipParts;
+            if (!FactionBuiltSpaceshipParts.TryGetValue(faction, out var parts))
+            {
+                parts = new HashSet<ProductionProject>();
+                FactionBuiltSpaceshipParts[faction] = parts;
+            }
+            return parts;
+        }
+
+        public Civilization ActiveCiv => GetCivilization(ActiveTurnFaction);
+        public string ActivePlayerName => ActiveTurnFaction == Faction.Player ? Player1Name : (ActiveTurnFaction == Faction.AiRival ? Player2Name : GetCivilization(ActiveTurnFaction).LeaderName);
         
         private DiplomacyManager _diplomacy;
         public DiplomacyManager Diplomacy => _diplomacy ??= new DiplomacyManager(this);
-        public bool IsAtWarWithAi { get; set; } = false;
+
+        public bool IsAtWarWithAi
+        {
+            get => IsAtWar(Faction.Player, Faction.AiRival);
+            set
+            {
+                if (value) DeclareWar(Faction.Player, Faction.AiRival);
+                else MakePeace(Faction.Player, Faction.AiRival);
+            }
+        }
+
+        public bool IsAtWar(Faction a, Faction b)
+        {
+            if (a == b) return false;
+            if (a == Faction.Barbarian || b == Faction.Barbarian) return true;
+            return ActiveWars.Contains((a, b)) || ActiveWars.Contains((b, a));
+        }
+
+        public void DeclareWar(Faction a, Faction b)
+        {
+            if (a == b || a == Faction.Barbarian || b == Faction.Barbarian) return;
+            ActiveWars.Add((a, b));
+            ActiveWars.Add((b, a));
+            if (a == Faction.Player || b == Faction.Player)
+            {
+                WarStartTurn = TurnNumber;
+                IsDefensiveWar = (b == Faction.Player);
+            }
+            Diplomacy.CancelAllDealsBetween(a, b);
+        }
+
+        public void MakePeace(Faction a, Faction b)
+        {
+            ActiveWars.Remove((a, b));
+            ActiveWars.Remove((b, a));
+            if (a == Faction.Player || b == Faction.Player)
+            {
+                PeaceTurns = 0;
+                WarWearinessPoints = Math.Max(0, WarWearinessPoints / 2);
+            }
+        }
         public GameEndState EndState { get; private set; } = GameEndState.None;
         public const int MaxTurnLimit = 50;
 
@@ -137,24 +282,52 @@ public class GameSimulation
             return set;
         }
 
-    public string PlayerCivId { get; set; } = "rome";
-    public string AiCivId { get; set; } = "babylon";
+    private string _playerCivId = "rome";
+    public string PlayerCivId
+    {
+        get => FactionCivilizations.GetValueOrDefault(Faction.Player, _playerCivId);
+        set
+        {
+            _playerCivId = value;
+            FactionCivilizations[Faction.Player] = value;
+        }
+    }
+
+    private string _aiCivId = "babylon";
+    public string AiCivId
+    {
+        get => FactionCivilizations.GetValueOrDefault(Faction.AiRival, _aiCivId);
+        set
+        {
+            _aiCivId = value;
+            FactionCivilizations[Faction.AiRival] = value;
+        }
+    }
+
     public DifficultyLevel Difficulty { get; set; } = DifficultyLevel.Regent;
     public DifficultySettings DifficultyConfig => DifficultySettings.Get(Difficulty);
-    public Civilization PlayerCiv => CivilizationRegistry.Get(PlayerCivId)!;
-    public Civilization AiCiv => CivilizationRegistry.Get(AiCivId)!;
+    public Civilization PlayerCiv => GetCivilization(Faction.Player);
+    public Civilization AiCiv => GetCivilization(Faction.AiRival);
 
-    public HashSet<string> AiResearchedTechs { get; } = new();
-    public string? AiCurrentResearchId { get; set; }
-    public int AiScienceProgress { get; set; }
+    public HashSet<string> AiResearchedTechs => GetResearchedTechs(Faction.AiRival);
+    public string? AiCurrentResearchId
+    {
+        get => FactionCurrentResearch.GetValueOrDefault(Faction.AiRival, null);
+        set => FactionCurrentResearch[Faction.AiRival] = value;
+    }
+    public int AiScienceProgress
+    {
+        get => FactionScienceProgress.GetValueOrDefault(Faction.AiRival, 0);
+        set => FactionScienceProgress[Faction.AiRival] = value;
+    }
 
     // Golden Age (Civ3: one per civ, 20 turns, +1 shield/commerce on productive tiles)
     public GoldenAge PlayerGoldenAge { get; } = new();
-    public GoldenAge AiGoldenAge { get; } = new();
+    public GoldenAge AiGoldenAge => GetGoldenAge(Faction.AiRival);
 
     // Space Race tracking – parts built by the player
     public HashSet<ProductionProject> BuiltSpaceshipParts { get; } = new();
-    public HashSet<ProductionProject> AiBuiltSpaceshipParts { get; } = new();
+    public HashSet<ProductionProject> AiBuiltSpaceshipParts => GetBuiltSpaceshipParts(Faction.AiRival);
 
     private static readonly HashSet<ProductionProject> AllSpaceshipParts = new()
     {
@@ -173,7 +346,6 @@ public class GameSimulation
     // Cultural Victory threshold (total culture in a single city)
     public const int CulturalVictoryThreshold = 50_000;
 
-
     private static readonly string[] BasicAncientTechs = {
         "bronze_working", "pottery", "alphabet", "ceremonial_burial",
         "warrior_code", "masonry", "the_wheel"
@@ -182,20 +354,54 @@ public class GameSimulation
     public bool IsTechResearched(Faction faction, string techId)
     {
         if (string.IsNullOrEmpty(techId)) return true;
-        if (faction == Faction.Player)
-        {
-            return Research.IsResearched(techId);
-        }
-        else
-        {
-            return Research.IsResearched(techId) || AiResearchedTechs.Contains(techId);
-        }
+        if (faction == Faction.Player) return Research.IsResearched(techId);
+        return GetResearchedTechs(faction).Contains(techId);
     }
 
-    private int _cityCounter = 0;
-    private static readonly string[] CityNames = { "Rome", "Sparta", "Athens", "Carthage", "Constantinople", "Alexandria", "Babylon", "Thebes" };
-    private int _aiCityCounter = 0;
-    private static readonly string[] AiCityNames = { "Kyoto", "Berlin", "Paris", "London", "Madrid", "Washington", "Beijing", "Delhi" };
+    private readonly Dictionary<string, int> _civCityCounters = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, string[]> CivCityNameLists = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["rome"] = new[] { "Rome", "Antium", "Cumae", "Neapolis", "Pompeii", "Pisae", "Ravenna", "Hispalis", "Mediolanum", "Viroconium" },
+        ["babylon"] = new[] { "Babylon", "Ur", "Nineveh", "Ashur", "Ellipi", "Akkad", "Uruk", "Eridu", "Samarra", "Kish" },
+        ["greece"] = new[] { "Athens", "Sparta", "Corinth", "Delphi", "Thebes", "Rhodes", "Knossos", "Argos", "Mycenae", "Ephesus" },
+        ["egypt"] = new[] { "Thebes", "Memphis", "Alexandria", "Heliopolis", "Giza", "Abydos", "Elephantine", "Hierakonpolis", "Avaris", "Pi-Ramesses" },
+        ["germany"] = new[] { "Berlin", "Leipzig", "Munich", "Heidelberg", "Nuremberg", "Cologne", "Frankfurt", "Stuttgart", "Bonn", "Hamburg" },
+        ["russia"] = new[] { "Moscow", "St. Petersburg", "Novgorod", "Smolensk", "Rostov", "Yaroslavl", "Yekaterinburg", "Yakutsk", "Vladivostok", "Kiev" },
+        ["america"] = new[] { "Washington", "New York", "Boston", "Philadelphia", "Atlanta", "Chicago", "San Francisco", "Seattle", "St. Louis", "Miami" },
+        ["china"] = new[] { "Beijing", "Shanghai", "Guangzhou", "Xi'an", "Chengdu", "Nanjing", "Hangzhou", "Wuhan", "Tianjin", "Luoyang" },
+        ["japan"] = new[] { "Kyoto", "Tokyo", "Osaka", "Edo", "Satsuma", "Kagoshima", "Nara", "Nagoya", "Yokohama", "Sapporo" },
+        ["england"] = new[] { "London", "York", "Nottingham", "Hastings", "Canterbury", "Coventry", "Warwick", "Newcastle", "Oxford", "Liverpool" },
+        ["france"] = new[] { "Paris", "Orleans", "Lyon", "Rheims", "Tours", "Marseilles", "Chartres", "Avignon", "Rouen", "Grenoble" },
+        ["india"] = new[] { "Delhi", "Bombay", "Madras", "Bangalore", "Calcutta", "Lahore", "Karachi", "Jaipur", "Hyderabad", "Varanasi" },
+        ["aztec"] = new[] { "Tenochtitlan", "Teotihuacan", "Tlatelolco", "Texcoco", "Tlaxcala", "Calixtlahuaca", "Xochicalco", "Tula", "Cholula", "Malinalco" },
+        ["zulu"] = new[] { "Zimbabwe", "Ulundi", "Bapedi", "Hlobane", "Isandhlwana", "Intombe", "Mpondo", "Nongoma", "Bulawayo", "Tugela" },
+        ["carthage"] = new[] { "Carthage", "Utica", "Leptis Magna", "Hippo", "Tingis", "Hadrumetum", "Cirta", "Thapsus", "Malaca", "Panormus" },
+        ["vikings"] = new[] { "Trondheim", "Bergen", "Oslo", "Stockholm", "Copenhagen", "Reykjavik", "Uppsala", "Aarhus", "Odense", "Stavanger" },
+        ["mongols"] = new[] { "Karakorum", "Ta-Tu", "Kazan", "Almarikh", "Tabriz", "Samarkand", "Bokhara", "Ulaanbaatar", "Otrar", "Sarai" },
+        ["arabia"] = new[] { "Mecca", "Medina", "Damascus", "Baghdad", "Najran", "Kufah", "Basra", "Riyadh", "Muscat", "Aden" },
+        ["ottomans"] = new[] { "Istanbul", "Edirne", "Bursa", "Sinop", "Izmit", "Uskudar", "Diyarbakir", "Konya", "Ankara", "Antalya" },
+        ["celts"] = new[] { "Entremont", "Alesia", "Camulodunum", "Gergovia", "Lugdunum", "Verulamium", "Bibracte", "Burdigala", "Tolosa", "Durocortorum" },
+        ["spain"] = new[] { "Madrid", "Barcelona", "Seville", "Toledo", "Santiago", "Salamanca", "Valencia", "Cordoba", "Zaragoza", "Granada" },
+        ["korea"] = new[] { "Seoul", "P'yongyang", "Wonsan", "Pusan", "Taegu", "Inchon", "Kaesong", "Suwon", "Chonju", "Kwangju" },
+        ["persia"] = new[] { "Persepolis", "Pasargadae", "Susa", "Arbela", "Antioch", "Tarsus", "Gordium", "Bactra", "Ecbatana", "Shiraz" },
+        ["iroquois"] = new[] { "Salamanca", "Niagara", "Grand River", "Allegheny", "Cattaraugus", "Caughnawaga", "Oka", "Tonawanda", "Kahnawake", "Akron" }
+    };
+
+    public string GetNextCityName(Faction faction, string civId)
+    {
+        string key = civId?.ToLower() ?? (faction == Faction.Player ? PlayerCivId : AiCivId);
+        _civCityCounters.TryGetValue(key, out int count);
+        _civCityCounters[key] = count + 1;
+
+        if (CivCityNameLists.TryGetValue(key, out var list) && count < list.Length)
+        {
+            return list[count];
+        }
+
+        var civ = CivilizationRegistry.Get(key);
+        string baseName = civ?.Name ?? "City";
+        return $"{baseName} City {count + 1}";
+    }
 
     public GameSimulation(GameMap map)
     {
@@ -301,33 +507,42 @@ public class GameSimulation
         }
 
         // 2. Give AI their starting technologies based on Civilization registry
-        if (AiCiv?.StartingTechIds != null)
+        var aiFactions = ActiveFactions.Where(f => f.IsAi()).ToList();
+        if (aiFactions.Count == 0) aiFactions.Add(Faction.AiRival);
+
+        int factionOffset = 0;
+        foreach (var aiFaction in aiFactions)
         {
-            foreach (var techId in AiCiv.StartingTechIds)
+            var civ = GetCivilization(aiFaction);
+            var researched = GetResearchedTechs(aiFaction);
+
+            if (civ?.StartingTechIds != null)
             {
-                AiResearchedTechs.Add(techId);
+                foreach (var techId in civ.StartingTechIds)
+                {
+                    researched.Add(techId);
+                }
             }
-        }
 
-        // 3. Give AI difficulty-specific starting technologies
-        int extraTechCount = DifficultyConfig.AiExtraStartingTechs;
-        if (extraTechCount > 0)
-        {
-            var rand = new Random(42);
-            // Get ancient era techs that are not already researched by AI
-            var availableTechs = BasicAncientTechs
-                .Where(t => !AiResearchedTechs.Contains(t))
-                .ToList();
-
-            int techsGiven = 0;
-            while (techsGiven < extraTechCount && availableTechs.Count > 0)
+            // 3. Give AI difficulty-specific starting technologies
+            int extraTechCount = DifficultyConfig.AiExtraStartingTechs;
+            if (extraTechCount > 0)
             {
-                int index = rand.Next(availableTechs.Count);
-                string selectedTech = availableTechs[index];
-                AiResearchedTechs.Add(selectedTech);
-                availableTechs.RemoveAt(index);
-                techsGiven++;
-                Console.WriteLine($"[Difficulty: {Difficulty}] AI Rival receives free starting technology: {selectedTech}!");
+                var rand = new Random(42 + factionOffset++);
+                var availableTechs = BasicAncientTechs
+                    .Where(t => !researched.Contains(t))
+                    .ToList();
+
+                int techsGiven = 0;
+                while (techsGiven < extraTechCount && availableTechs.Count > 0)
+                {
+                    int index = rand.Next(availableTechs.Count);
+                    string selectedTech = availableTechs[index];
+                    researched.Add(selectedTech);
+                    availableTechs.RemoveAt(index);
+                    techsGiven++;
+                    Console.WriteLine($"[Difficulty: {Difficulty}] AI {civ?.Name ?? aiFaction.ToString()} receives free starting technology: {selectedTech}!");
+                }
             }
         }
     }
@@ -404,118 +619,158 @@ public class GameSimulation
 
         Units.Add(new Unit("settler_1", UnitType.Settler, settlerX, settlerY, Faction.Player, PlayerCivId));
 
-        SetupAiRival();
+        SetupAiRivals();
 
         UpdateVisibility();
     }
 
-    public void SetupAiRival()
+    public void SetupAiRival() => SetupAiRivals();
+
+    public void SetupAiRivals()
     {
-        // Player start is near the center, let's find our player's first unit (or center)
         var playerUnit = Units.FirstOrDefault(u => u.Faction == Faction.Player);
         int px = playerUnit?.X ?? Map.Width / 2;
         int py = playerUnit?.Y ?? Map.Height / 2;
 
-        // Opposite side of the map
-        int aiStartX = Map.Width - px;
-        int aiStartY = Map.Height - py;
+        var aiFactions = ActiveFactions.Where(f => f.IsAi()).ToList();
+        if (aiFactions.Count == 0) aiFactions.Add(Faction.AiRival);
 
-        // If the calculated position is too close to the player (e.g. because px/py is in the exact center), offset it!
-        int distance = Map.GetManhattanDistance(aiStartX, aiStartY, px, py);
-        if (distance < Map.Width / 3)
+        var placedStarts = new List<(int X, int Y)> { (px, py) };
+
+        for (int i = 0; i < aiFactions.Count; i++)
         {
-            // Shift AI starting search position to another quadrant
-            aiStartX = Map.NormalizeX(px + Map.Width / 3);
-            aiStartY = (py + Map.Height / 3) % Map.Height;
-        }
+            var rivalFaction = aiFactions[i];
+            var civ = GetCivilization(rivalFaction);
+            string civId = civ.Id;
 
-        // Ensure within reasonable bounds
-        aiStartX = Map.NormalizeX(aiStartX);
-        aiStartY = Math.Clamp(aiStartY, 2, Map.Height - 3);
+            // Distribute starting centers in a circle around the globe
+            double angle = 2.0 * Math.PI * (i + 1) / (aiFactions.Count + 1);
+            int radiusX = (int)(Map.Width * 0.35);
+            int radiusY = (int)(Map.Height * 0.30);
+            int candidateCenterX = Map.NormalizeX((int)(px + radiusX * Math.Cos(angle)));
+            int candidateCenterY = Math.Clamp((int)(py + radiusY * Math.Sin(angle)), 4, Map.Height - 5);
 
-        bool foundLand = false;
-        // Search in a spiral for a safe land tile
-        for (int r = 0; r < 15 && !foundLand; r++)
-        {
-            for (int dx = -r; dx <= r && !foundLand; dx++)
+            int aiStartX = candidateCenterX;
+            int aiStartY = candidateCenterY;
+            bool foundLand = false;
+
+            int minSeparation = Math.Max(8, Map.Width / (aiFactions.Count + 3));
+
+            // Spiral search for suitable land
+            for (int r = 0; r < 20 && !foundLand; r++)
             {
-                for (int dy = -r; dy <= r && !foundLand; dy++)
+                for (int dx = -r; dx <= r && !foundLand; dx++)
                 {
-                    int tx = Map.NormalizeX(aiStartX + dx);
-                    int ty = aiStartY + dy;
-                    if (Map.IsInBounds(tx, ty))
+                    for (int dy = -r; dy <= r && !foundLand; dy++)
                     {
-                        var tile = Map.GetTile(tx, ty);
-                        if (tile != null && tile.IsValidStartTile)
+                        int tx = Map.NormalizeX(candidateCenterX + dx);
+                        int ty = candidateCenterY + dy;
+                        if (Map.IsInBounds(tx, ty))
                         {
-                            aiStartX = tx;
-                            aiStartY = ty;
-                            foundLand = true;
+                            var tile = Map.GetTile(tx, ty);
+                            if (tile != null && tile.IsValidStartTile)
+                            {
+                                bool tooClose = placedStarts.Any(p => Map.GetChebyshevDistance(p.X, p.Y, tx, ty) < minSeparation);
+                                if (!tooClose)
+                                {
+                                    aiStartX = tx;
+                                    aiStartY = ty;
+                                    foundLand = true;
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Spawn AI Explorer
-        string aiExplorerId = $"ai_explorer_{Guid.NewGuid().ToString().Substring(0, 8)}";
-        Units.Add(new Unit(aiExplorerId, UnitType.Explorer, aiStartX, aiStartY, Faction.AiRival, AiCivId));
-
-        // Expansionist Trait: Spawn extra starting Explorer for AI
-        bool aiIsExpansionist = AiCiv.Trait1 == CivTrait.Expansionist || AiCiv.Trait2 == CivTrait.Expansionist;
-        if (aiIsExpansionist)
-        {
-            string extraAiExplorerId = $"ai_explorer_extra_{Guid.NewGuid().ToString().Substring(0, 8)}";
-            Units.Add(new Unit(extraAiExplorerId, UnitType.Explorer, aiStartX, aiStartY, Faction.AiRival, AiCivId));
-            Console.WriteLine("[Expansionist] AI Rival receives an extra starting Explorer!");
-        }
-
-        // Find an adjacent land tile for AI Settler
-        int aiSettlerX = aiStartX;
-        int aiSettlerY = aiStartY;
-        bool foundSettlerLand = false;
-
-        foreach (int dx in new[] { 0, 1, -1 })
-        {
-            foreach (int dy in new[] { 1, -1, 0 })
+            // Fallback if map was tight
+            if (!foundLand)
             {
-                if (foundSettlerLand) break;
-                int tx = Map.NormalizeX(aiStartX + dx);
-                int ty = aiStartY + dy;
-                if (Map.IsInBounds(tx, ty) && (tx != aiStartX || ty != aiStartY))
+                for (int r = 0; r < 25 && !foundLand; r++)
                 {
-                    var tile = Map.GetTile(tx, ty);
-                    if (tile != null && tile.IsValidStartTile)
+                    for (int dx = -r; dx <= r && !foundLand; dx++)
                     {
-                        aiSettlerX = tx;
-                        aiSettlerY = ty;
-                        foundSettlerLand = true;
+                        for (int dy = -r; dy <= r && !foundLand; dy++)
+                        {
+                            int tx = Map.NormalizeX(candidateCenterX + dx);
+                            int ty = candidateCenterY + dy;
+                            if (Map.IsInBounds(tx, ty))
+                            {
+                                var tile = Map.GetTile(tx, ty);
+                                if (tile != null && tile.IsValidStartTile)
+                                {
+                                    aiStartX = tx;
+                                    aiStartY = ty;
+                                    foundLand = true;
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        string aiSettlerId = $"ai_settler_{Guid.NewGuid().ToString().Substring(0, 8)}";
-        Units.Add(new Unit(aiSettlerId, UnitType.Settler, aiSettlerX, aiSettlerY, Faction.AiRival, AiCivId));
+            placedStarts.Add((aiStartX, aiStartY));
 
-        // Difficulty: AI receives extra starting Warrior units at higher difficulty levels
-        int extraAiUnits = DifficultyConfig.AiExtraStartingUnits;
-        for (int i = 0; i < extraAiUnits; i++)
-        {
-            string extraWarriorId = $"ai_warrior_extra_{i}_{Guid.NewGuid().ToString().Substring(0, 8)}";
-            Units.Add(new Unit(extraWarriorId, UnitType.Warrior, aiStartX, aiStartY, Faction.AiRival, AiCivId));
-        }
-        if (extraAiUnits > 0)
-        {
-            Console.WriteLine($"[Difficulty: {Difficulty}] AI Rival receives {extraAiUnits} extra starting Warrior(s)!");
-        }
+            // Spawn AI Explorer
+            string aiExplorerId = $"{rivalFaction.ToString().ToLower()}_explorer_{Guid.NewGuid().ToString().Substring(0, 8)}";
+            Units.Add(new Unit(aiExplorerId, UnitType.Explorer, aiStartX, aiStartY, rivalFaction, civId));
 
-        Console.WriteLine($"[AI Rival] Spawned AI Rival starting units at ({aiStartX}, {aiStartY})");
+            // Expansionist Trait: Spawn extra starting Explorer for AI
+            bool aiIsExpansionist = civ.Trait1 == CivTrait.Expansionist || civ.Trait2 == CivTrait.Expansionist;
+            if (aiIsExpansionist)
+            {
+                string extraAiExplorerId = $"{rivalFaction.ToString().ToLower()}_explorer_extra_{Guid.NewGuid().ToString().Substring(0, 8)}";
+                Units.Add(new Unit(extraAiExplorerId, UnitType.Explorer, aiStartX, aiStartY, rivalFaction, civId));
+                Console.WriteLine($"[Expansionist] AI {civ.Name} receives an extra starting Explorer!");
+            }
+
+            // Find an adjacent land tile for AI Settler
+            int aiSettlerX = aiStartX;
+            int aiSettlerY = aiStartY;
+            bool foundSettlerLand = false;
+
+            foreach (int dx in new[] { 0, 1, -1 })
+            {
+                foreach (int dy in new[] { 1, -1, 0 })
+                {
+                    if (foundSettlerLand) break;
+                    int tx = Map.NormalizeX(aiStartX + dx);
+                    int ty = aiStartY + dy;
+                    if (Map.IsInBounds(tx, ty) && (tx != aiStartX || ty != aiStartY))
+                    {
+                        var tile = Map.GetTile(tx, ty);
+                        if (tile != null && tile.IsValidStartTile)
+                        {
+                            aiSettlerX = tx;
+                            aiSettlerY = ty;
+                            foundSettlerLand = true;
+                        }
+                    }
+                }
+            }
+
+            string aiSettlerId = $"{rivalFaction.ToString().ToLower()}_settler_{Guid.NewGuid().ToString().Substring(0, 8)}";
+            Units.Add(new Unit(aiSettlerId, UnitType.Settler, aiSettlerX, aiSettlerY, rivalFaction, civId));
+
+            // Difficulty: AI receives extra starting Warrior units at higher difficulty levels
+            int extraAiUnits = DifficultyConfig.AiExtraStartingUnits;
+            for (int k = 0; k < extraAiUnits; k++)
+            {
+                string extraWarriorId = $"{rivalFaction.ToString().ToLower()}_warrior_extra_{k}_{Guid.NewGuid().ToString().Substring(0, 8)}";
+                Units.Add(new Unit(extraWarriorId, UnitType.Warrior, aiStartX, aiStartY, rivalFaction, civId));
+            }
+            if (extraAiUnits > 0)
+            {
+                Console.WriteLine($"[Difficulty: {Difficulty}] AI {civ.Name} receives {extraAiUnits} extra starting Warrior(s)!");
+            }
+
+            Console.WriteLine($"[AI Setup] Spawned {civ.Name} ({rivalFaction}) starting units at ({aiStartX}, {aiStartY})");
+        }
     }
 
     public void UpdateVisibility()
     {
-        // 1. Shroud currently visible areas for both player 1 and player 2
+        // 1. Shroud currently visible areas for player and other factions
         for (int x = 0; x < Map.Width; x++)
         {
             for (int y = 0; y < Map.Height; y++)
@@ -528,15 +783,21 @@ public class GameSimulation
                 {
                     Player2VisibilityGrid[x, y] = FogState.Shrouded;
                 }
+                foreach (var grid in FactionVisibility.Values)
+                {
+                    if (grid[x, y] == FogState.Visible)
+                    {
+                        grid[x, y] = FogState.Shrouded;
+                    }
+                }
             }
         }
 
         // 2. Apply active vision around units for their respective faction
         foreach (var unit in Units)
         {
-            if (unit.Faction != Faction.Player && unit.Faction != Faction.AiRival) continue;
-            var targetGrid = unit.Faction == Faction.Player ? VisibilityGrid : Player2VisibilityGrid;
-            if (targetGrid == null) continue;
+            if (unit.Faction == Faction.Barbarian) continue;
+            var targetGrid = GetVisibilityGrid(unit.Faction);
 
             int r = unit.VisionRange;
             var tile = Map.GetTile(unit.X, unit.Y);
@@ -562,9 +823,8 @@ public class GameSimulation
         // 3. Apply active vision around cities for their respective faction
         foreach (var city in Cities)
         {
-            if (city.Faction != Faction.Player && city.Faction != Faction.AiRival) continue;
-            var targetGrid = city.Faction == Faction.Player ? VisibilityGrid : Player2VisibilityGrid;
-            if (targetGrid == null) continue;
+            if (city.Faction == Faction.Barbarian) continue;
+            var targetGrid = GetVisibilityGrid(city.Faction);
 
             int r = city.VisionRange;
             for (int dx = -r; dx <= r; dx++)
@@ -600,17 +860,7 @@ public class GameSimulation
     {
         if (!CanBuildCity(unit)) return null;
 
-        string name;
-        if (unit.Faction == Faction.AiRival)
-        {
-            name = _aiCityCounter < AiCityNames.Length ? AiCityNames[_aiCityCounter] : $"AI City {_aiCityCounter + 1}";
-            _aiCityCounter++;
-        }
-        else
-        {
-            name = _cityCounter < CityNames.Length ? CityNames[_cityCounter] : $"City {_cityCounter + 1}";
-            _cityCounter++;
-        }
+        string name = GetNextCityName(unit.Faction, unit.CivilizationId);
 
         var city = new City($"city_{Guid.NewGuid().ToString().Substring(0, 8)}", name, unit.X, unit.Y, TurnNumber, unit.Faction, unit.CivilizationId);
         
@@ -826,14 +1076,11 @@ public class GameSimulation
     /// </summary>
     public void UpdateUnitMovementBonuses()
     {
-        bool playerHasMagellan = DoesFactionControlWonder(Faction.Player, "magellans_voyage");
-        bool aiHasMagellan = DoesFactionControlWonder(Faction.AiRival, "magellans_voyage");
-
         foreach (var unit in Units)
         {
             if (unit.IsNavalUnit)
             {
-                bool hasMagellan = unit.Faction == Faction.Player ? playerHasMagellan : (unit.Faction == Faction.AiRival && aiHasMagellan);
+                bool hasMagellan = DoesFactionControlWonder(unit.Faction, "magellans_voyage");
                 float prevBonus = unit.MovementBonus;
                 unit.MovementBonus = hasMagellan ? 2.0f : 0.0f;
                 if (unit.MovementBonus > prevBonus)
@@ -886,18 +1133,20 @@ public class GameSimulation
                     Console.WriteLine($"[Theory of Evolution] Player discovered free advance: {candidate.Name}!");
                 }
             }
-            else if (faction == Faction.AiRival)
+            else
             {
-                if (!string.IsNullOrEmpty(AiCurrentResearchId) && !AiResearchedTechs.Contains(AiCurrentResearchId))
+                var researched = GetResearchedTechs(faction);
+                string? currentTech = FactionCurrentResearch.GetValueOrDefault(faction, null);
+                if (!string.IsNullOrEmpty(currentTech) && !researched.Contains(currentTech))
                 {
-                    candidate = Research.AllTechnologies.FirstOrDefault(t => t.Id == AiCurrentResearchId);
+                    candidate = Research.AllTechnologies.FirstOrDefault(t => t.Id == currentTech);
                 }
 
                 if (candidate == null || grantedTechs.Contains(candidate.Id))
                 {
                     candidate = Research.AllTechnologies
-                        .Where(t => !AiResearchedTechs.Contains(t.Id) && !grantedTechs.Contains(t.Id))
-                        .Where(t => t.PrerequisiteIds.All(p => AiResearchedTechs.Contains(p) || grantedTechs.Contains(p)))
+                        .Where(t => !researched.Contains(t.Id) && !grantedTechs.Contains(t.Id))
+                        .Where(t => t.PrerequisiteIds.All(p => researched.Contains(p) || grantedTechs.Contains(p)))
                         .OrderBy(t => t.Era)
                         .ThenBy(t => t.ScienceCost)
                         .FirstOrDefault();
@@ -905,14 +1154,15 @@ public class GameSimulation
 
                 if (candidate != null)
                 {
-                    AiResearchedTechs.Add(candidate.Id);
+                    researched.Add(candidate.Id);
                     grantedTechs.Add(candidate.Id);
-                    if (AiCurrentResearchId == candidate.Id)
+                    if (FactionCurrentResearch.GetValueOrDefault(faction) == candidate.Id)
                     {
-                        AiCurrentResearchId = null;
-                        AiScienceProgress = 0;
+                        FactionCurrentResearch[faction] = null;
+                        FactionScienceProgress[faction] = 0;
                     }
-                    Console.WriteLine($"[Theory of Evolution] AI Rival discovered free advance: {candidate.Name}!");
+                    var civ = GetCivilization(faction);
+                    Console.WriteLine($"[Theory of Evolution] {civ.Name} discovered free advance: {candidate.Name}!");
                 }
             }
         }
@@ -930,7 +1180,16 @@ public class GameSimulation
         {
             if (DoesFactionControlWonder(Faction.Player, "great_library") && !Research.IsResearched("education"))
             {
-                var techsToLearn = AiResearchedTechs.Where(t => !Research.IsResearched(t)).ToList();
+                var allKnownAiTechs = new HashSet<string>();
+                foreach (var ai in ActiveFactions.Where(f => f.IsAi()))
+                {
+                    foreach (var t in GetResearchedTechs(ai))
+                    {
+                        allKnownAiTechs.Add(t);
+                    }
+                }
+
+                var techsToLearn = allKnownAiTechs.Where(t => !Research.IsResearched(t)).ToList();
                 foreach (var techId in techsToLearn)
                 {
                     Research.ResearchedTechIds.Add(techId);
@@ -945,21 +1204,24 @@ public class GameSimulation
             }
         }
 
-        // 2. Check AI Rival
-        if (specificFaction == null || specificFaction == Faction.AiRival)
+        // 2. Check AI Rivals
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
         {
-            if (DoesFactionControlWonder(Faction.AiRival, "great_library") && !AiResearchedTechs.Contains("education"))
+            if (specificFaction != null && specificFaction != aiFaction) continue;
+            var aiResearched = GetResearchedTechs(aiFaction);
+            if (DoesFactionControlWonder(aiFaction, "great_library") && !aiResearched.Contains("education"))
             {
-                var techsToLearn = Research.ResearchedTechIds.Where(t => !AiResearchedTechs.Contains(t)).ToList();
+                var techsToLearn = Research.ResearchedTechIds.Where(t => !aiResearched.Contains(t)).ToList();
                 foreach (var techId in techsToLearn)
                 {
-                    AiResearchedTechs.Add(techId);
+                    aiResearched.Add(techId);
                     var tech = Research.AllTechnologies.FirstOrDefault(t => t.Id == techId);
-                    Console.WriteLine($"[The Great Library] AI Rival acquired {tech?.Name ?? techId} through ancient scrolls!");
-                    if (AiCurrentResearchId == techId)
+                    var civ = GetCivilization(aiFaction);
+                    Console.WriteLine($"[The Great Library] {civ.Name} acquired {tech?.Name ?? techId} through ancient scrolls!");
+                    if (FactionCurrentResearch.GetValueOrDefault(aiFaction) == techId)
                     {
-                        AiCurrentResearchId = null;
-                        AiScienceProgress = 0;
+                        FactionCurrentResearch[aiFaction] = null;
+                        FactionScienceProgress[aiFaction] = 0;
                     }
                 }
             }
@@ -1316,14 +1578,7 @@ public class GameSimulation
         if (a.Faction == Faction.Barbarian || b.Faction == Faction.Barbarian) return true;
         if (a.HasHiddenNationality || b.HasHiddenNationality) return true;
 
-        // Player vs. AI Rival
-        if ((a.Faction == Faction.Player && b.Faction == Faction.AiRival) ||
-            (a.Faction == Faction.AiRival && b.Faction == Faction.Player))
-        {
-            return IsAtWarWithAi;
-        }
-
-        return false;
+        return IsAtWar(a.Faction, b.Faction);
     }
 
     public float GetTileMovementCostForUnit(TileData tile, Unit unit)
@@ -1348,21 +1603,18 @@ public class GameSimulation
         if (tile == null || string.IsNullOrEmpty(tile.OwnerCityId)) return;
 
         var city = Cities.FirstOrDefault(c => c.Id == tile.OwnerCityId);
-        if (city == null) return;
+        if (city == null || city.Faction == unit.Faction) return;
 
-        // If a player unit enters AI territory and we are at peace
-        if (unit.Faction == Faction.Player && city.Faction == Faction.AiRival && !IsAtWarWithAi)
+        if (!IsAtWar(unit.Faction, city.Faction))
         {
-            IsAtWarWithAi = true;
-            OnWarDeclared(isDefensive: false); // Player initiated war
-            Console.WriteLine($"[Diplomacy] WAR declared! Player unit {unit.Type} intruded into {city.Name}'s territory at ({targetX}, {targetY})!");
-        }
-        // If an AI unit enters player territory and we are at peace
-        else if (unit.Faction == Faction.AiRival && city.Faction == Faction.Player && !IsAtWarWithAi)
-        {
-            IsAtWarWithAi = true;
-            OnWarDeclared(isDefensive: true); // AI attacked us - defensive war
-            Console.WriteLine($"[Diplomacy] WAR declared! AI unit {unit.Type} intruded into {city.Name}'s territory at ({targetX}, {targetY})!");
+            DeclareWar(unit.Faction, city.Faction);
+            if (city.Faction == Faction.Player || unit.Faction == Faction.Player)
+            {
+                OnWarDeclared(isDefensive: city.Faction == Faction.Player);
+            }
+            var unitCiv = GetCivilization(unit.Faction);
+            var cityCiv = GetCivilization(city.Faction);
+            Console.WriteLine($"[Diplomacy] WAR declared! {unitCiv.Name} unit {unit.Type} intruded into {cityCiv.Name}'s city ({city.Name}) territory at ({targetX}, {targetY})!");
         }
     }
 
@@ -1649,7 +1901,7 @@ public class GameSimulation
     {
         if (a == b) return false;
         if (a == Faction.Barbarian || b == Faction.Barbarian) return true;
-        return IsAtWarWithAi;
+        return IsAtWar(a, b);
     }
 
     public bool LoadUnitIntoTransport(Unit cargo, Unit transport)
@@ -2191,16 +2443,17 @@ public class GameSimulation
         // A faction is "alive" if it has at least one city or a settler.
         bool playerAlive = Cities.Any(c => c.Faction == Faction.Player) ||
                            Units.Any(u => u.Faction == Faction.Player && u.Type == UnitType.Settler);
-        bool aiAlive     = Cities.Any(c => c.Faction == Faction.AiRival) ||
-                           Units.Any(u => u.Faction == Faction.AiRival && u.Type == UnitType.Settler);
+        bool anyAiAlive  = ActiveFactions.Where(f => f.IsAi()).Any(ai => 
+                           Cities.Any(c => c.Faction == ai) || 
+                           Units.Any(u => u.Faction == ai && u.Type == UnitType.Settler));
 
-        if (!playerAlive && aiAlive)
+        if (!playerAlive && anyAiAlive)
         {
             EndState = GameEndState.DefeatConquest;
             Console.WriteLine("[Game End] DEFEAT! All your cities and settlers have been destroyed.");
             return;
         }
-        if (!aiAlive && playerAlive)
+        if (!anyAiAlive && playerAlive)
         {
             EndState = GameEndState.VictoryConquest;
             Console.WriteLine("[Game End] VICTORY! You have eliminated all rival civilizations!");
@@ -2217,20 +2470,26 @@ public class GameSimulation
             Console.WriteLine("[Game End] VICTORY! Your spaceship has launched to Alpha Centauri!");
             return;
         }
-        // AI Space Race check
-        bool aiApollo = Cities.Any(c => c.Faction == Faction.AiRival &&
-                                       c.Buildings.Any(b => b.Id == "apollo_program"));
-        if (aiApollo && AllSpaceshipParts.IsSubsetOf(AiBuiltSpaceshipParts))
+
+        // AI Space Race check for all active AI rivals
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
         {
-            EndState = GameEndState.DefeatSpaceRace;
-            Console.WriteLine("[Game End] DEFEAT! The AI Rival has launched their spaceship to Alpha Centauri!");
-            return;
+            bool aiApollo = Cities.Any(c => c.Faction == aiFaction &&
+                                           c.Buildings.Any(b => b.Id == "apollo_program"));
+            if (aiApollo && AllSpaceshipParts.IsSubsetOf(GetBuiltSpaceshipParts(aiFaction)))
+            {
+                EndState = GameEndState.DefeatSpaceRace;
+                var civ = GetCivilization(aiFaction);
+                Console.WriteLine($"[Game End] DEFEAT! {civ.Name} has launched their spaceship to Alpha Centauri!");
+                return;
+            }
         }
 
         // --- 3. Domination Victory ---
-        // Player controls 2/3 of all land tiles AND 2/3 of total population.
-        int totalLandTiles   = 0;
-        int playerLandTiles  = 0;
+        // A civ controls 2/3 of all land tiles AND 2/3 of total population.
+        int totalLandTiles = 0;
+        var landTilesByFaction = new Dictionary<Faction, int>();
+
         for (int x = 0; x < Map.Width; x++)
         {
             for (int y = 0; y < Map.Height; y++)
@@ -2241,46 +2500,42 @@ public class GameSimulation
                 if (!string.IsNullOrEmpty(tile.OwnerCityId))
                 {
                     var ownerCity = Cities.Find(c => c.Id == tile.OwnerCityId);
-                    if (ownerCity?.Faction == Faction.Player) playerLandTiles++;
+                    if (ownerCity != null)
+                    {
+                        landTilesByFaction[ownerCity.Faction] = landTilesByFaction.GetValueOrDefault(ownerCity.Faction, 0) + 1;
+                    }
                 }
             }
         }
 
-        int totalPop  = Cities.Sum(c => c.Population);
+        int totalPop = Cities.Sum(c => c.Population);
         int playerPop = Cities.Where(c => c.Faction == Faction.Player).Sum(c => c.Population);
-        int aiPop     = totalPop - playerPop;
+        int playerLand = landTilesByFaction.GetValueOrDefault(Faction.Player, 0);
 
-        int aiLandTiles = 0;
-        for (int x = 0; x < Map.Width; x++)
-        {
-            for (int y = 0; y < Map.Height; y++)
-            {
-                var tile = Map.GetTile(x, y);
-                if (tile == null || !tile.IsLand) continue;
-                if (!string.IsNullOrEmpty(tile.OwnerCityId))
-                {
-                    var ownerCity = Cities.Find(c => c.Id == tile.OwnerCityId);
-                    if (ownerCity?.Faction == Faction.AiRival) aiLandTiles++;
-                }
-            }
-        }
-
-        bool playerLandDomination = totalLandTiles > 0 && playerLandTiles * 3 >= totalLandTiles * 2;
+        bool playerLandDomination = totalLandTiles > 0 && playerLand * 3 >= totalLandTiles * 2;
         bool playerPopDomination  = totalPop > 0        && playerPop  * 3 >= totalPop * 2;
-        bool aiLandDomination     = totalLandTiles > 0 && aiLandTiles * 3 >= totalLandTiles * 2;
-        bool aiPopDomination      = totalPop > 0        && aiPop     * 3 >= totalPop * 2;
 
         if (playerLandDomination && playerPopDomination)
         {
             EndState = GameEndState.VictoryDomination;
-            Console.WriteLine($"[Game End] VICTORY! You control {playerLandTiles}/{totalLandTiles} land tiles and {playerPop}/{totalPop} population — Domination!");
+            Console.WriteLine($"[Game End] VICTORY! You control {playerLand}/{totalLandTiles} land tiles and {playerPop}/{totalPop} population — Domination!");
             return;
         }
-        if (aiLandDomination && aiPopDomination)
+
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
         {
-            EndState = GameEndState.DefeatDomination;
-            Console.WriteLine($"[Game End] DEFEAT! The AI Rival controls {aiLandTiles}/{totalLandTiles} land tiles and {aiPop}/{totalPop} population — Domination!");
-            return;
+            int aiLand = landTilesByFaction.GetValueOrDefault(aiFaction, 0);
+            int aiPop = Cities.Where(c => c.Faction == aiFaction).Sum(c => c.Population);
+            bool aiLandDomination = totalLandTiles > 0 && aiLand * 3 >= totalLandTiles * 2;
+            bool aiPopDomination  = totalPop > 0        && aiPop  * 3 >= totalPop * 2;
+
+            if (aiLandDomination && aiPopDomination)
+            {
+                EndState = GameEndState.DefeatDomination;
+                var civ = GetCivilization(aiFaction);
+                Console.WriteLine($"[Game End] DEFEAT! {civ.Name} controls {aiLand}/{totalLandTiles} land tiles and {aiPop}/{totalPop} population — Domination!");
+                return;
+            }
         }
 
         // --- 4. Cultural Victory ---
@@ -2293,33 +2548,37 @@ public class GameSimulation
             Console.WriteLine($"[Game End] VICTORY! {playerCulturalCity.Name} has achieved legendary cultural status with {playerCulturalCity.AccumulatedCulture} culture!");
             return;
         }
-        var aiCulturalCity = Cities.FirstOrDefault(c => c.Faction == Faction.AiRival &&
-                                                        c.AccumulatedCulture >= CulturalVictoryThreshold);
-        if (aiCulturalCity != null)
+
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
         {
-            EndState = GameEndState.DefeatCultural;
-            Console.WriteLine($"[Game End] DEFEAT! The AI's {aiCulturalCity.Name} has achieved legendary cultural status with {aiCulturalCity.AccumulatedCulture} culture!");
-            return;
+            var aiCulturalCity = Cities.FirstOrDefault(c => c.Faction == aiFaction &&
+                                                            c.AccumulatedCulture >= CulturalVictoryThreshold);
+            if (aiCulturalCity != null)
+            {
+                EndState = GameEndState.DefeatCultural;
+                var civ = GetCivilization(aiFaction);
+                Console.WriteLine($"[Game End] DEFEAT! {civ.Name}'s {aiCulturalCity.Name} has achieved legendary cultural status with {aiCulturalCity.AccumulatedCulture} culture!");
+                return;
+            }
         }
 
         // --- 5. Diplomatic Victory (checked when UN is built, see SpawnProjectResult) ---
-        // Handled inline in SpawnProjectResult to fire immediately on UN completion.
 
         // --- 6. Histograph / Score Victory (turn limit) ---
         if (TurnNumber >= MaxTurnLimit)
         {
             int playerScore = CalculateScore(Faction.Player);
-            int aiScore     = CalculateScore(Faction.AiRival);
+            int highestAiScore = ActiveFactions.Where(f => f.IsAi()).Select(CalculateScore).DefaultIfEmpty(0).Max();
 
-            if (playerScore > aiScore)
+            if (playerScore > highestAiScore)
             {
                 EndState = GameEndState.VictoryScore;
-                Console.WriteLine($"[Game End] VICTORY! Turn limit reached. Your Score: {playerScore} | AI Score: {aiScore}");
+                Console.WriteLine($"[Game End] VICTORY! Turn limit reached. Your Score: {playerScore} | Top Rival: {highestAiScore}");
             }
             else
             {
                 EndState = GameEndState.DefeatScore;
-                Console.WriteLine($"[Game End] DEFEAT! Turn limit reached. Your Score: {playerScore} | AI Score: {aiScore}");
+                Console.WriteLine($"[Game End] DEFEAT! Turn limit reached. Your Score: {playerScore} | Top Rival: {highestAiScore}");
             }
         }
     }
@@ -2350,16 +2609,7 @@ public class GameSimulation
             }
         }
         int tilePoints = ownedTiles * 1;
-
-        int techPoints = 0;
-        if (faction == Faction.Player)
-        {
-            techPoints = Research.ResearchedTechIds.Count * 10;
-        }
-        else
-        {
-            techPoints = AiResearchedTechs.Count * 10;
-        }
+        int techPoints = GetResearchedTechs(faction).Count * 10;
 
         return cityPoints + popPoints + unitPoints + tilePoints + techPoints;
     }
@@ -2746,8 +2996,10 @@ public class GameSimulation
         }
 
         // 3.9 Process Golden Age countdown
-        PlayerGoldenAge.ProcessTurn();
-        AiGoldenAge.ProcessTurn();
+        foreach (var f in ActiveFactions)
+        {
+            GetGoldenAge(f).ProcessTurn();
+        }
 
         // 3.10 Record Histograph data for this turn
         Histograph.RecordTurn(this);
@@ -3306,44 +3558,52 @@ public class GameSimulation
 
     private void ProcessAiResearch()
     {
-        // Calculate AI science per turn from AI city commerce
-        int aiCommerce = Cities
-            .Where(c => c.Faction == Faction.AiRival)
-            .Sum(c => c.StoredCommerce);
-
-        if (aiCommerce <= 0) return;
-
-        // Pick a research target if none selected
-        if (AiCurrentResearchId == null || AiResearchedTechs.Contains(AiCurrentResearchId))
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
         {
-            var available = Research.AllTechnologies
-                .Where(t => !AiResearchedTechs.Contains(t.Id)
-                            && t.PrerequisiteIds.All(p => AiResearchedTechs.Contains(p) || Research.IsResearched(p)))
-                .OrderBy(t => t.Era)
-                .ThenBy(t => t.ScienceCost)
-                .FirstOrDefault();
+            var civ = GetCivilization(aiFaction);
+            int aiCommerce = Cities
+                .Where(c => c.Faction == aiFaction)
+                .Sum(c => c.StoredCommerce);
 
-            if (available == null) return;
-            AiCurrentResearchId = available.Id;
-            AiScienceProgress = 0;
-        }
+            if (aiCommerce <= 0) continue;
 
-        var tech = Research.AllTechnologies.Find(t => t.Id == AiCurrentResearchId);
-        if (tech == null)
-        {
-            AiCurrentResearchId = null;
-            return;
-        }
+            var researched = GetResearchedTechs(aiFaction);
+            string? currentResearch = FactionCurrentResearch.GetValueOrDefault(aiFaction);
 
-        AiScienceProgress += aiCommerce;
+            // Pick a research target if none selected
+            if (currentResearch == null || researched.Contains(currentResearch))
+            {
+                var available = Research.AllTechnologies
+                    .Where(t => !researched.Contains(t.Id)
+                                && t.PrerequisiteIds.All(p => researched.Contains(p)))
+                    .OrderBy(t => t.Era)
+                    .ThenBy(t => t.ScienceCost)
+                    .FirstOrDefault();
 
-        if (AiScienceProgress >= tech.ScienceCost)
-        {
-            AiResearchedTechs.Add(tech.Id);
-            AiCurrentResearchId = null;
-            AiScienceProgress = 0;
-            Console.WriteLine($"[AI Research] AI Rival has discovered {tech.Name}!");
-            ApplyGreatLibraryCatchup(Faction.Player);
+                if (available == null) continue;
+                FactionCurrentResearch[aiFaction] = available.Id;
+                FactionScienceProgress[aiFaction] = 0;
+                currentResearch = available.Id;
+            }
+
+            var tech = Research.AllTechnologies.Find(t => t.Id == currentResearch);
+            if (tech == null)
+            {
+                FactionCurrentResearch[aiFaction] = null;
+                continue;
+            }
+
+            int currentProgress = FactionScienceProgress.GetValueOrDefault(aiFaction, 0) + aiCommerce;
+            FactionScienceProgress[aiFaction] = currentProgress;
+
+            if (currentProgress >= tech.ScienceCost)
+            {
+                researched.Add(tech.Id);
+                FactionCurrentResearch[aiFaction] = null;
+                FactionScienceProgress[aiFaction] = 0;
+                Console.WriteLine($"[AI Research] {civ.Name} has discovered {tech.Name}!");
+                ApplyGreatLibraryCatchup(Faction.Player);
+            }
         }
     }
 
@@ -3466,7 +3726,10 @@ public class GameSimulation
     private void ProcessAiRivalTurn()
     {
         if (Mode != GameMode.SinglePlayer) return;
-        AiRivalBrain.ProcessTurn(this);
+        foreach (var aiFaction in ActiveFactions.Where(f => f.IsAi()))
+        {
+            AiRivalBrain.ProcessTurn(this, aiFaction);
+        }
     }
 
     private void AutoAssignTiles(City city)
@@ -3544,7 +3807,7 @@ public class GameSimulation
 
         // Pre-calculate ranks for corruption
         var factionRanks = new System.Collections.Generic.Dictionary<City, int>();
-        foreach (var f in new[] { Faction.Player, Faction.AiRival })
+        foreach (var f in ActiveFactions)
         {
             var factionCities = Cities.Where(c => c.Faction == f).ToList();
             factionCities.Sort((a, b) => GetDistanceToNearestCapital(a).CompareTo(GetDistanceToNearestCapital(b)));
@@ -3657,8 +3920,8 @@ public class GameSimulation
 
             // Sum up yields from working tiles
             // Apply: Government tile penalty/bonus, Golden Age bonus
-            var ga = city.Faction == Faction.Player ? PlayerGoldenAge : AiGoldenAge;
-            var cityGov = Government.Get(city.Faction == Faction.Player ? PlayerGovernment : AiGovernment);
+            var ga = GetGoldenAge(city.Faction);
+            var cityGov = Government.Get(GetGovernment(city.Faction));
             foreach (var tile in workingTiles)
             {
                 var yield = tile.TotalYield;
@@ -3813,7 +4076,7 @@ public class GameSimulation
             production -= waste;
 
             // Difficulty: AI yield multiplier (higher difficulty = AI gets more production)
-            if (city.Faction == Faction.AiRival)
+            if (city.Faction.IsAi())
             {
                 production = (int)Math.Round(production * DifficultyConfig.AiYieldMultiplier);
                 commerce = (int)Math.Round(commerce * DifficultyConfig.AiYieldMultiplier);

@@ -171,12 +171,7 @@ public partial class UnitRenderer : Node2D
                 sprite.Scale = onCityTile ? new Vector2(0.75f, 0.75f) : new Vector2(1.0f, 1.0f);
 
                 // Apply faction color tint
-                if (unit.Faction == Faction.Barbarian)
-                    sprite.SelfModulate = new Color(0.9f, 0.4f, 0.4f);
-                else if (unit.Faction == Faction.AiRival)
-                    sprite.SelfModulate = new Color(0.7f, 0.6f, 0.9f);
-                else
-                    sprite.SelfModulate = Colors.White;
+                sprite.SelfModulate = GetFactionModulateColor(unit.Faction);
 
                 // Status Icon
                 if (!_statusIcons.TryGetValue(unit.Id, out var statusLabel))
@@ -944,5 +939,21 @@ public partial class UnitRenderer : Node2D
                 }
             }
         }
+    }
+
+    private static Color GetFactionModulateColor(Faction faction)
+    {
+        return faction switch
+        {
+            Faction.Barbarian => new Color(0.9f, 0.4f, 0.4f),
+            Faction.AiRival   => new Color(0.75f, 0.60f, 0.95f),
+            Faction.AiRival2  => new Color(0.95f, 0.55f, 0.55f),
+            Faction.AiRival3  => new Color(0.55f, 0.90f, 0.95f),
+            Faction.AiRival4  => new Color(0.55f, 0.95f, 0.60f),
+            Faction.AiRival5  => new Color(1.00f, 0.75f, 0.45f),
+            Faction.AiRival6  => new Color(0.60f, 0.70f, 1.00f),
+            Faction.AiRival7  => new Color(0.95f, 0.60f, 0.85f),
+            _ => Colors.White
+        };
     }
 }

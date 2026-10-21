@@ -10,6 +10,8 @@ public class GameSetupOptions
     public int Seed { get; set; } = 1337;
     public string PlayerCivId { get; set; } = "rome";
     public string AiCivId { get; set; } = "babylon";
+    public int NumberOfRivals { get; set; } = 3;
+    public System.Collections.Generic.List<string> RivalCivIds { get; set; } = new();
 
     // Original Civilization III parameters
     public string WaterPercentage { get; set; } = "70%";   // "60%", "70%", "80%", "random"
@@ -37,6 +39,8 @@ public class GameSetupOptions
             Seed = Seed,
             PlayerCivId = PlayerCivId,
             AiCivId = AiCivId,
+            NumberOfRivals = NumberOfRivals,
+            RivalCivIds = new System.Collections.Generic.List<string>(RivalCivIds),
             WaterPercentage = WaterPercentage,
             GeologicalAge = GeologicalAge,
             Climate = Climate,
@@ -57,10 +61,32 @@ public class GameSetupOptions
             var civs = CivilizationRegistry.All.Keys.ToList();
             resolved.PlayerCivId = civs[rand.Next(civs.Count)];
         }
-        if (resolved.AiCivId == "random" || resolved.AiCivId == resolved.PlayerCivId)
+
+        // Clamp number of rivals (1 to 7 rivals)
+        if (resolved.NumberOfRivals < 1) resolved.NumberOfRivals = 1;
+        if (resolved.NumberOfRivals > 7) resolved.NumberOfRivals = 7;
+
+        // Resolve rival civilizations list
+        var availableCivs = CivilizationRegistry.All.Keys.Where(id => id != resolved.PlayerCivId).ToList();
+        resolved.RivalCivIds = new System.Collections.Generic.List<string>();
+
+        // If a specific primary rival was selected and valid, add it first
+        if (resolved.AiCivId != "random" && availableCivs.Contains(resolved.AiCivId))
         {
-            var civs = CivilizationRegistry.All.Keys.Where(id => id != resolved.PlayerCivId).ToList();
-            resolved.AiCivId = civs[rand.Next(civs.Count)];
+            resolved.RivalCivIds.Add(resolved.AiCivId);
+            availableCivs.Remove(resolved.AiCivId);
+        }
+
+        while (resolved.RivalCivIds.Count < resolved.NumberOfRivals && availableCivs.Count > 0)
+        {
+            int idx = rand.Next(availableCivs.Count);
+            resolved.RivalCivIds.Add(availableCivs[idx]);
+            availableCivs.RemoveAt(idx);
+        }
+
+        if (resolved.RivalCivIds.Count > 0)
+        {
+            resolved.AiCivId = resolved.RivalCivIds[0];
         }
 
         // Resolve Random Water

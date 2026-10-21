@@ -25,16 +25,23 @@ public static class DemographicsData
     public static List<DemographicRow> Compute(GameSimulation sim)
     {
         var rows = new List<DemographicRow>();
+        int totalCivs = sim.ActiveFactions.Count;
+
         foreach (var category in Categories)
         {
+            var factionValues = sim.ActiveFactions
+                .Select(f => (Faction: f, Value: GetValue(sim, f, category)))
+                .OrderByDescending(x => x.Value)
+                .ToList();
+
             int playerVal = GetValue(sim, Faction.Player, category);
-            int aiVal = GetValue(sim, Faction.AiRival, category);
+            int rank = factionValues.FindIndex(x => x.Faction == Faction.Player) + 1;
+            if (rank == 0) rank = 1;
 
-            int rank = playerVal >= aiVal ? 1 : 2;
-            string best = playerVal >= aiVal ? sim.PlayerCiv.Name : sim.AiCiv.Name;
-            string worst = playerVal >= aiVal ? sim.AiCiv.Name : sim.PlayerCiv.Name;
+            string best = sim.GetCivilization(factionValues.First().Faction).Name;
+            string worst = sim.GetCivilization(factionValues.Last().Faction).Name;
 
-            rows.Add(new DemographicRow(category, FormatValue(category, playerVal), rank, 2, best, worst));
+            rows.Add(new DemographicRow(category, FormatValue(category, playerVal), rank, totalCivs, best, worst));
         }
         return rows;
     }
@@ -76,9 +83,7 @@ public static class DemographicsData
             {
                 int total = sim.Research.AllTechnologies.Count;
                 if (total <= 0) return 0;
-                int known = faction == Faction.Player
-                    ? sim.Research.ResearchedTechIds.Count
-                    : sim.Research.ResearchedTechIds.Union(sim.AiResearchedTechs).Count();
+                int known = sim.GetResearchedTechs(faction).Count;
                 return known * 100 / total;
             }
 

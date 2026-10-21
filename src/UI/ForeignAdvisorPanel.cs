@@ -84,10 +84,19 @@ public partial class ForeignAdvisorPanel : PanelContainer
         var advisorPortrait = new Label { Text = "\U0001f9d1\u200d\u2696\ufe0f" };
         advisorPortrait.AddThemeFontSizeOverride("font_size", 48);
 
-        string warStatus = _sim.IsAtWarWithAi ? "We are at WAR" : "We are at PEACE";
-        string advisorMessage = _sim.IsAtWarWithAi
-            ? $"{warStatus} with the {_sim.AiCiv.Name}.\nThey are a dangerous foe. Consider building up our military before any offensive."
-            : $"{warStatus} with the {_sim.AiCiv.Name}.\nDiplomatic relations are stable. We could propose trade or demand tribute.";
+        var activeRivals = _sim.ActiveFactions.Where(f => f.IsAi()).ToList();
+        var wars = activeRivals.Where(f => _sim.IsAtWar(Faction.Player, f)).ToList();
+
+        string advisorMessage;
+        if (wars.Count > 0)
+        {
+            var warCivNames = string.Join(", ", wars.Select(w => _sim.GetCivilization(w).Name));
+            advisorMessage = $"We are at WAR with: {warCivNames}!\nThey are dangerous foes. Consider building up our military before any offensive.";
+        }
+        else
+        {
+            advisorMessage = "We are at PEACE with all known civilizations.\nDiplomatic relations are stable. We could propose trade or demand tribute.";
+        }
 
         var messagePanel = new PanelContainer();
         var msgStyle = new StyleBoxFlat { BgColor = Colors.White, BorderColor = new Color(0.5f, 0.5f, 0.3f), BorderWidthTop = 2, BorderWidthBottom = 2, BorderWidthLeft = 2, BorderWidthRight = 2 };
@@ -149,53 +158,51 @@ public partial class ForeignAdvisorPanel : PanelContainer
         var playerRow = CreateTableRow(_sim.PlayerCiv.Name, _sim.PlayerCiv.LeaderName, "YOU", playerCities.ToString(), playerUnits.ToString(), false);
         tableVBox.AddChild(playerRow);
 
-        // AI Rival row
-        int aiCities = _sim.Cities.Count(c => c.Faction == Faction.AiRival);
-        int aiUnits = _sim.Units.Count(u => u.Faction == Faction.AiRival);
-        string status = _sim.IsAtWarWithAi ? "AT WAR" : "Peace";
-        var aiRow = CreateTableRow(_sim.AiCiv.Name, _sim.AiCiv.LeaderName, status, aiCities.ToString(), "?");
-        if (_sim.IsAtWarWithAi)
+        // AI Rival rows for all active rivals
+        foreach (var aiFaction in activeRivals)
         {
-            aiRow.Modulate = new Color(1.0f, 0.85f, 0.85f);
+            var civ = _sim.GetCivilization(aiFaction);
+            int aiCities = _sim.Cities.Count(c => c.Faction == aiFaction);
+            bool isWar = _sim.IsAtWar(Faction.Player, aiFaction);
+            string status = isWar ? "AT WAR" : "Peace";
+            var aiRow = CreateTableRow(civ.Name, civ.LeaderName, status, aiCities.ToString(), "?");
+            if (isWar)
+            {
+                aiRow.Modulate = new Color(1.0f, 0.85f, 0.85f);
+            }
+
+            var btnBox = new HBoxContainer();
+            btnBox.AddThemeConstantOverride("separation", 10);
+
+            var localFaction = aiFaction;
+            var tradeBtn = new Button { Text = "Diplomacy", CustomMinimumSize = new Vector2(80, 25) };
+            tradeBtn.Pressed += () => 
+            {
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
+                var diag = new DiplomacyDialog(_sim, localFaction);
+                AddChild(diag);
+            };
+            btnBox.AddChild(tradeBtn);
+
+            var spyBtn = new Button { Text = "Espionage", CustomMinimumSize = new Vector2(80, 25) };
+            spyBtn.Pressed += () =>
+            {
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
+                var espDiag = new EspionageScreen(_sim);
+                AddChild(espDiag);
+            };
+            btnBox.AddChild(spyBtn);
+
+            if (_sim.Diplomacy.HasSpy(Faction.Player, localFaction))
+            {
+                var spyIcon = new Label { Text = "👁️" };
+                spyIcon.AddThemeColorOverride("font_color", new Color(0.2f, 0.8f, 0.2f));
+                btnBox.AddChild(spyIcon);
+            }
+
+            aiRow.AddChild(btnBox);
+            tableVBox.AddChild(aiRow);
         }
-        
-        var btnBox = new HBoxContainer();
-        btnBox.AddThemeConstantOverride("separation", 10);
-
-        var tradeBtn = new Button { Text = "Diplomacy", CustomMinimumSize = new Vector2(80, 25) };
-        tradeBtn.Pressed += () => 
-        {
-            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
-            var diag = new DiplomacyDialog(_sim, Faction.AiRival);
-            AddChild(diag);
-        };
-        btnBox.AddChild(tradeBtn);
-
-        var spyBtn = new Button { Text = "Espionage", CustomMinimumSize = new Vector2(80, 25) };
-        spyBtn.Pressed += () =>
-        {
-            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/click.wav");
-            var espDiag = new EspionageScreen(_sim);
-            AddChild(espDiag);
-        };
-        btnBox.AddChild(spyBtn);
-
-        if (_sim.Diplomacy.HasSpy(Faction.Player, Faction.AiRival))
-        {
-            var spyIcon = new Label { Text = "👁️" };
-            spyIcon.AddThemeColorOverride("font_color", new Color(0.2f, 0.8f, 0.2f));
-            btnBox.AddChild(spyIcon);
-        }
-
-        aiRow.AddChild(btnBox);
-
-        tableVBox.AddChild(aiRow);
-
-        // --- FUTURE: More civs will be listed here ---
-        var placeholder = new Label { Text = "\n(Additional civilizations will appear here as the game expands to multi-civ.)", HorizontalAlignment = HorizontalAlignment.Center };
-        placeholder.AddThemeColorOverride("font_color", new Color(0.5f, 0.5f, 0.5f));
-        placeholder.AddThemeFontSizeOverride("font_size", 12);
-        tableVBox.AddChild(placeholder);
 
         contentSplit.AddChild(tableVBox);
         mainVBox.AddChild(contentSplit);
