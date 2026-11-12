@@ -19,6 +19,14 @@ public class DiplomacyManager
     // Spies: true if Faction key has planted a spy in Faction value
     public HashSet<(Faction From, Faction To)> Spies { get; } = new();
 
+    public event Action<TradeDeal>? OnTradeDealExpired;
+    public event Action<TradeDeal, string>? OnAiProposedDeal;
+
+    public void TriggerAiProposal(TradeDeal deal, string message)
+    {
+        OnAiProposedDeal?.Invoke(deal, message);
+    }
+
     public DiplomacyManager(GameSimulation sim)
     {
         _sim = sim;
@@ -106,31 +114,39 @@ public class DiplomacyManager
         }
     }
 
+    public void CancelDeal(TradeDeal deal)
+    {
+        if (ActiveDeals.Remove(deal))
+        {
+            Console.WriteLine($"[DIPLOMACY] Trade deal between {deal.FactionA} and {deal.FactionB} has been cancelled.");
+        }
+    }
+
     public void ProcessTurnEnd()
     {
-        foreach(var deal in ActiveDeals.ToList()) // ToList to avoid modification during enumeration
+        foreach (var deal in ActiveDeals.ToList()) // ToList to avoid modification during enumeration
         {
             // Transfer GPT
             if (deal.GoldPerTurnA > 0) TransferGold(deal.FactionA, deal.FactionB, deal.GoldPerTurnA);
             if (deal.GoldPerTurnB > 0) TransferGold(deal.FactionB, deal.FactionA, deal.GoldPerTurnB);
 
-            // Treaties & right of passage logic would just be checked globally using ActiveDeals, no per-turn action needed.
-
             deal.TurnsRemaining--;
             if (deal.TurnsRemaining <= 0)
             {
                 ActiveDeals.Remove(deal);
-                // Optionally notify players that a deal has expired
+                OnTradeDealExpired?.Invoke(deal);
+                Console.WriteLine($"[TRADE EXPIRED] The 20-turn trade agreement between {deal.FactionA} and {deal.FactionB} has concluded.");
             }
         }
     }
 
     private void TransferGold(Faction from, Faction to, int amount)
     {
-        if (from == Faction.Player) _sim.PlayerTreasury -= amount;
-        // If AI had a real treasury, we'd deduct it there, but for now prototype
+        int fromCurrent = _sim.GetTreasury(from);
+        _sim.SetTreasury(from, Math.Max(0, fromCurrent - amount));
 
-        if (to == Faction.Player) _sim.PlayerTreasury += amount;
+        int toCurrent = _sim.GetTreasury(to);
+        _sim.SetTreasury(to, toCurrent + amount);
     }
 
     private void GiveTech(Faction to, string techId)

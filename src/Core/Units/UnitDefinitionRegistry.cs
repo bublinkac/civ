@@ -409,8 +409,8 @@ public static class UnitDefinitionRegistry
 
         Register(new(UnitType.Submarine, "Submarine", TechEra.Industrial, 8, 4, 3f, 100,
             requiredTechId: "combustion", requiredResourceIds: new[] { "oil" }, domain: UnitDomain.Sea,
-            isStealth: true, upgradesTo: UnitType.NuclearSubmarine,
-            description: "Submerged stealth predator. Invisible to enemies unless adjacent or spotted by Destroyers."));
+            isStealth: true, detectsStealth: true, upgradesTo: UnitType.NuclearSubmarine,
+            description: "Submerged stealth predator. Invisible to enemies unless adjacent or spotted by Destroyers/Submarines."));
 
         Register(new(UnitType.Carrier, "Carrier", TechEra.Industrial, 1, 8, 5f, 180,
             requiredTechId: "motorized_transportation", requiredResourceIds: new[] { "oil" }, domain: UnitDomain.Sea,
@@ -419,7 +419,7 @@ public static class UnitDefinitionRegistry
 
         Register(new(UnitType.NuclearSubmarine, "Nuclear Submarine", TechEra.Modern, 8, 4, 4f, 140,
             requiredTechId: "fission", requiredResourceIds: new[] { "uranium" }, domain: UnitDomain.Sea,
-            isStealth: true, transportCapacity: 1,
+            isStealth: true, detectsStealth: true, transportCapacity: 1,
             description: "Nuclear-powered stealth submarine capable of carrying a tactical nuke."));
 
         Register(new(UnitType.AegisCruiser, "AEGIS Cruiser", TechEra.Modern, 14, 10, 5f, 160,

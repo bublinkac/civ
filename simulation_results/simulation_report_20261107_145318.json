@@ -1,0 +1,62 @@
+{
+  "Timestamp": "2026-11-07T14:53:18.6906118+01:00",
+  "Config": {
+    "MapWidth": 40,
+    "Difficulty": "Regent",
+    "GamesCount": 2,
+    "PlayerCiv": "rome",
+    "MapHeight": 40,
+    "MaxTurns": 60,
+    "RivalCiv": "babylon"
+  },
+  "Summary": {
+    "TotalGames": 2,
+    "TotalElapsedSeconds": 0.37,
+    "TotalTurns": 35.0,
+    "Draws": 0,
+    "PlayerWinRate": 50.0,
+    "RivalWinRate": 50.0,
+    "RivalWins": 1,
+    "PlayerWins": 1,
+    "AverageTurnsPerGame": 17.5,
+    "AverageTurnDurationMs": 10.46
+  },
+  "Results": [
+    {
+      "GameIndex": 1,
+      "Seed": 1137,
+      "FinalTurn": 12,
+      "FinalYear": "3450 BC",
+      "Outcome": "Player Victory (Conquest)",
+      "ElapsedMs": 221,
+      "PlayerCities": 1,
+      "RivalCities": 0,
+      "PlayerUnits": 0,
+      "RivalUnits": 0,
+      "PlayerTreasury": 0,
+      "RivalTreasury": 0,
+      "PlayerTechs": 3,
+      "RivalTechs": 4,
+      "WarningsCount": 0,
+      "Warnings": []
+    },
+    {
+      "GameIndex": 2,
+      "Seed": 1274,
+      "FinalTurn": 23,
+      "FinalYear": "2900 BC",
+      "Outcome": "Rival Victory (Conquest)",
+      "ElapsedMs": 87,
+      "PlayerCities": 0,
+      "RivalCities": 1,
+      "PlayerUnits": 0,
+      "RivalUnits": 3,
+      "PlayerTreasury": 1,
+      "RivalTreasury": 0,
+      "PlayerTechs": 2,
+      "RivalTechs": 15,
+      "WarningsCount": 0,
+      "Warnings": []
+    }
+  ]
+}

@@ -686,32 +686,176 @@ Full 6-advisor system matching Civ3's F1-F6 keybinding layout.
 
 ---
 
+## Phase 43: Simulation, Spectator Mode & Headless Testing Architecture (COMPLETED)
+
+### 1. Engine-Agnostic Decoupling (`src/Core/`)
+- [x] **Safe Godot Runtime Check (`EngineContext.cs`):** Isolated process-based environment detection (`EngineContext.IsGodotRuntime`) ensuring non-Godot CLI runners do not trigger native C++ singleton access violations (`0xC0000005`).
+- [x] **TerrainRegistry Decoupling:** Replaced direct `ProjectSettings.GlobalizePath` and `GD.Print` calls with native C# file resolution and console fallbacks.
+- [x] **JsonSaveSystem Decoupling:** Ensured save paths fall back to local `./saves/` directory when running outside of Godot engine.
+
+### 2. In-Engine Visual Spectator Mode (`src/Render/SpectatorController.cs`, `src/UI/SpectatorOverlay.cs`)
+- [x] **Spectator Controller:** Added `SpectatorController` node managing automated turn cycling, AI control delegation for `Faction.Player`, and omniscient God Mode vision.
+- [x] **Interactive HUD Overlay:** Built `SpectatorOverlay` with Play/Pause toggles, Step 1 Turn, speed presets (0.5s, 0.2s, 0.05s, Turbo 0s), fast-forward buttons (+10, +50, +100), and real-time empire demographics readout.
+- [x] **Non-Blocking Auto-Capture:** Auto-resolves city capture prompts during spectator mode (`OnCityCapturePrompt`) to prevent modal dialogs from halting the simulation.
+- [x] **Keyboard Controls & Top Bar Integration:** Added `F10` keybinding to toggle spectator mode, Spacebar to Pause/Resume, `Ctrl+Shift+F` for 50-turn fast-forward, and an `👁️ Spectator` button in `GameHud.cs`.
+
+### 3. Headless Monte Carlo Simulator (`scripts/run_headless_simulation.ps1`)
+- [x] **High-Speed Batch Runner:** Simulates hundreds of turns at native CPU speed (~4-7 ms per turn).
+- [x] **Invariant Testing:** Verifies unit bounds, city placement, and simulation consistency on every turn.
+- [x] **Telemetry & Balance Export:** Generates structured JSON reports (`simulation_results/simulation_report_*.json`) with game outcomes, turns elapsed, tech counts, and winrate statistics.
+
+---
+
 ## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
 
 This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
 
-### Phase 43: Trade Routes & Commercial Agreements (High Priority)
-- [ ] **Trade Advisor Enhancements (`src/UI/TradeAdvisorPanel.cs`):**
-  - Visualize all active bilateral trade agreements (Gold Per Turn treaties, Luxury imports/exports, Strategic resource deliveries).
-  - List remaining turns on 20-turn trade pacts with cancel/renegotiate options.
-- [ ] **Resource Depletion & Discovery:**
-  - Implement authentic Civ3 strategic resource depletion chances (e.g. Iron or Oil running dry) and sudden new discoveries in mountains/plains.
+## Phase 44: Authentic Civ3 Game Mechanics & Commercial Diplomacy (COMPLETED)
 
-### Phase 44: Cultural Influence Map Overlay & Flip Risk Predictor (Medium Priority)
-- [ ] **Cultural Advisor Map View (`src/UI/CulturalAdvisorPanel.cs`):**
-  - Add an interactive territory overlay showing cultural pressure zones between competing borders.
-  - Display numerical probability of cultural flipping for border cities based on distance to capitals, garrison strength, and culture ratio.
+### 1. Strategic Resource Depletion & Discovery (`ResourceDepletionSystem.cs`)
+- [x] **Authentic Depletion Engine:** Actively worked/connected strategic resources (Iron, Horses, Oil, Coal, Rubber, Saltpeter, Aluminum, Uranium) have a 1 in 800 turn probability (`DisappearanceProbability`) to deplete and vanish.
+- [x] **Global Balance Preservation:** Upon depletion, the strategic resource automatically relocates and spawns on an unexploited valid terrain tile elsewhere on the globe.
+- [x] **Prospecting Discovery:** Worked improved tiles (Mines/Farms) have a 1 in 1500 turn probability to strike a new vein of an unlocked strategic resource.
+- [x] **Simulation & HUD Events:** Dispatched `OnStrategicResourceDepleted` and `OnStrategicResourceDiscovered` events with notifications in `GameHud`.
 
-### Phase 45: Advanced Naval Combat, Submarines & Stealth Mechanics (Medium Priority)
-- [ ] **Submarines & Stealth Units:**
-  - Implement invisible movement for Submarines and Stealth Fighters/Bombers (invisible to non-destroyer units unless bumped into).
-  - Add specialized Anti-Submarine Warfare (ASW) sonar detection rules for Destroyers and Cruisers.
+### 2. Trade Advisor & 20-Turn Bilateral Agreements (`TradeAdvisorPanel.cs`, `DiplomacyManager.cs`)
+- [x] **Dynamic Agreement Ledger:** Replaced static placeholder in `TradeAdvisorPanel.cs` with an interactive list of active agreements showing partner civilization, turns remaining (countdown from 20), and exported/imported items (GPT, Strategic Resources, Luxuries, Peace, Right of Passage).
+- [x] **Pact Cancellation:** Added `Cancel Agreement` button allowing manual termination of agreements.
+- [x] **Resource Production Integration:** Wired `DiplomacyManager.HasTradedResource` into `GameSimulation.CityHasResourceAccess`, enabling cities to build units and wonders requiring traded resources.
 
-### Phase 46: Civilopedia & In-Game Encyclopedia (Low Priority)
-- [ ] **Civilopedia UI:**
-  - Create a searchable in-game guide displaying game concepts, unit statistics, terrain yields, technology prerequisites, and historical background lore.
+### 3. Proactive AI Diplomacy (`AiRivalBrain.cs`, `DiplomacyDialog.cs`)
+- [x] **AI-Initiated Peace Envoys:** Losing AI civilizations (severely outnumbered or lost cities after prolonged war) proactively dispatch peace envoys offering peace treaties and sweetener gold.
+- [x] **Scholarly Tech Exchanges:** Peaceful AI rivals with established embassies evaluate and propose bilateral technology barter deals.
+- [x] **Diplomatic Modal Integration:** Added `OnAiProposedDeal` event in `DiplomacyManager` opening `DiplomacyDialog` with pre-filled terms and leader greetings.
 
-### Phase 47: Audio & Era-Specific Atmospheric Soundscapes (Low Priority)
+### 4. Cultural Flip Risk Predictor (`CulturalAdvisorPanel.cs`, `GameSimulation.cs`)
+- [x] **Border Risk Formula:** Added `CalculateCityCulturalFlipRisk` calculating exact flip probability based on enemy nearby culture radius vs city culture and military garrison suppression.
+- [x] **Advisor Table & Warnings:** Added "Border Risk" column to `CulturalAdvisorPanel.cs` with color-coded threat badges (`🟢 Safe (0%)`, `🟡 Warn (<2%)`, `🚨 HIGH (>=2%)`).
+- [x] **Advisor Speech Bubble Alerts:** Cultural advisor dynamically alerts the player when a border city is in danger of defecting and advises rushing temples or reinforcing garrison troops.
+
+---
+
+## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
+
+This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
+
+## Phase 45: Advanced Naval Combat, Submarine Bump & ASW Sonar Mechanics (COMPLETED)
+
+### 1. Submarine Bump Collision & Peacetime Interception (`GameSimulation.cs`)
+- [x] **Civ3 Authentic Submarine Bump:** A surface vessel attempting to move into an apparently empty water tile occupied by an invisible submerged submarine collides with it.
+- [x] **Peacetime Resolution:** If factions are at peace, the collision reveals the submerged submarine, consumes 1 movement point from the moving vessel, and halts the ship on its starting tile without triggering unintended war.
+- [x] **Ambush During War:** If factions are at war, moving onto an undetected enemy submarine tile triggers an immediate Submarine Ambush and naval combat resolution.
+- [x] **Atmospheric HUD Notifications:** Dispatches `OnSubmarineCollision` and `OnSubmarineAmbush` events, notifying players via `GameHud` and playing spatial sound cues.
+
+### 2. ASW Sonar Detection & Hydrophones (`GameSimulation.cs`, `UnitDefinitionRegistry.cs`, `UnitRenderer.cs`)
+- [x] **Active ASW Sonar:** Destroyers, AEGIS Cruisers, Submarines, and Nuclear Submarines possess `DetectsStealth = true`, actively detecting all submerged stealth submarines within a 2-tile radius.
+- [x] **Harbor Surveillance:** Friendly coastal ports and cities actively track submerged vessels within harbor waters (radius 1).
+- [x] **Sonar Contact Event:** Dispatches `OnSonarContactDetected` when an ASW vessel sweeps and detects a submerged hostile contact.
+- [x] **Visual Indicators:** Detected enemy submarines display a distinct `📡` Sonar Contact badge in `UnitRenderer.cs` and show `[ASW SONAR]` and `[SUBMERGED STEALTH]` tags in `GameHud.cs`.
+- [x] **Targeting & Reticle Protection:** Undetected enemy stealth submarines are hidden from tactical bombardment reticles (`TargetingReticleRenderer.cs`) and AI cheat-targeting, preserving authentic fog-of-war stealth.
+
+### 3. Submarine Tactical Withdrawal / Emergency Deep Dive (`GameSimulation.cs`)
+- [x] **Defensive Retreat Check:** When a defending submarine faces fatal damage (`HP <= 0`) against a surface attacker that lacks ASW Sonar (`DetectsStealth == false`), it has a 50% chance (65% for Elite) to execute an Emergency Deep Dive.
+- [x] **Disengagement & Escape:** The submarine survives with 1 HP and retreats to an adjacent, safe water tile, escaping the enemy vessel.
+- [x] **Attacker Retreat:** Attacking submarines taking fatal damage from non-ASW defenders have a 50% chance to abort the attack run and submerge with 1 HP remaining.
+- [x] **HUD Event:** Dispatches `OnSubmarineWithdrawal` notifying the player of successful tactical disengagements.
+
+### 4. Privateers & Hidden Nationality (`GameSimulation.cs`, `UnitRenderer.cs`, `GameHud.cs`)
+- [x] **Jolly Roger Neutral Flag:** Units with `HasHiddenNationality = true` (Privateers) can engage in combat against any foreign naval vessel without requiring or causing formal war declarations (`DeclareWar`).
+- [x] **Diplomatic Immunity:** Privateer skirmishes never break 20-turn peace treaties, trade pacts, or cause diplomatic reputation penalties.
+- [x] **War Weariness Exemption:** Battles involving Privateers do not accrue national war weariness points.
+- [x] **Pirate Visuals & HUD Masking:** Hostile Privateers render with pirate-black sails (`Color(0.35f, 0.35f, 0.35f)`), a `🏴‍☠️` status icon, and display `[Pirate / Unknown]` in `GameHud.cs` without leaking the owning civilization's identity.
+
+---
+
+## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
+
+This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
+
+## Phase 46: Modern Civilopedia & Tactical Codex (COMPLETED)
+
+### 1. Modern Split-View Architecture & UX Design (`CivilopediaDialog.cs`)
+- [x] **Split-View Master-Detail Layout:** Left-hand scrollable sidebar for instant navigation (item list with iconography, subtitles, era/domain badges) and expansive right-hand detail canvas.
+- [x] **Modern Aesthetics:** Dark obsidian slate theme with Civ-gold border accents (`#d9ad38`), clean typographic hierarchy, and responsive margins replacing clunky Civ3-era dialogs.
+- [x] **Global Real-Time Search (`LineEdit`):** Instant substring query filtering across article titles, categories, eras, and strategy advice with clear button (`✕`) and live match counter.
+- [x] **Keyboard Accessibility:** Direct toggle via `F12` and smooth close on `Escape` keypress.
+
+### 2. Category System & Dynamic Sub-Filters
+- [x] **7 Core Categories:**
+  1. `⚔️ Jednotky` (Units)
+  2. `🏛️ Budovy` (Buildings)
+  3. `⭐ Divy sveta` (Wonders & Small Wonders)
+  4. `🔬 Veda & Technológie` (Technologies)
+  5. `🌲 Terén & Suroviny` (Terrain & Strategic/Luxury/Bonus Resources)
+  6. `⚖️ Formy vlády` (Governments)
+  7. `💡 Herné koncepty` (Game Concepts & Mechanics)
+- [x] **Contextual Sub-Filter Chips:** Dynamic chips row on the sidebar for quick filtering (e.g. Pozemné, Námorné, Letecké, Civilné pre jednotky; Starovek, Stredovek, Priemyselná, Moderná pre vedu).
+
+### 3. Rich Detail View & Tactical Strategy Matrix
+- [x] **Hero Header Banner:** Large icon, title, era pill badge, and sub-category pill.
+- [x] **Quick Stats Matrix:** Responsive multi-column grid displaying key attributes (Shield cost, Attack/Defense, Movement, Bombard range/strength, Science/Culture/Commerce bonuses, Upkeep, Corruption, War Weariness).
+- [x] **Ability Badges:** Green chip pills highlighting special combat & gameplay perks (Zone of Control, Stealth Submarine, ASW Sonar, Privateer, Irrigation, Mining, Fresh Water, Double worker speed, etc.).
+- [x] **Interactive Navigation & Cross-Links:** Clickable link buttons for technology prerequisites, required strategic resources, upgrade paths (Upgrades From / Upgrades To), and related articles.
+- [x] **Tactical Strategy Guide & Historical Lore:** Practical competitive advice for multiplayer/higher difficulties alongside rich historical background flavor text.
+
+### 4. Engine-Agnostic Core Data Repository (`CivilopediaRepository.cs`)
+- [x] **Decoupled Architecture:** `src/Core/Civilopedia/CivilopediaRepository.cs` generates and caches all 315+ encyclopedia entries dynamically from core game registries without instantiating Godot UI nodes.
+- [x] **Headless Safety:** Enables automated headless testing, verification scripts, and AI query access without native Godot runtime crashes (`0xC0000005`).
+- [x] **Verified via Automation:** Validated with 100% pass rate in `scripts/test_civilopedia.ps1` and Monte Carlo headless game simulations.
+
+---
+
+## Phase 47: Turn Event Ticker & Advisor Notifications (COMPLETED)
+
+### 1. Engine-Agnostic Core Data Layer (`src/Core/Events/TurnEvent.cs`)
+- [x] **Decoupled Architecture:** Pure C# data structures (`TurnEvent`, `TurnEventLog`, `TurnEventCategory`, `TurnEventSeverity`, `AdvisorType`, `TurnEventActionType`) with zero Godot runtime dependencies, fully tested and runnable in headless mode.
+- [x] **Comprehensive Event Logging:**
+  - **City Production & Construction:** Units trained, standard buildings completed, world/small wonders constructed, Apollo Program / spaceship components assembled.
+  - **Urban Development & Famine:** Population growth, population capacity limits reached (Aqueduct / Hospital needed), starvation/famine alerts.
+  - **Social Stability & Revolts:** Civil disorder outbreaks, disorder continuations, restorations of peace.
+  - **Science & Technological Breakthroughs:** New technologies researched, idle science warnings when research queue is empty.
+  - **Disasters & Environment:** Volcanic eruptions wiping out improvements/tiles, pollution outbreaks, disease spreading.
+  - **Economy & Treasury:** Bankruptcy alerts with emergency unit disbandment.
+  - **Strategic Discoveries & Depletions:** Resource exhaustion and new mineral discoveries.
+  - **Military Intelligence:** Enemy army sightings near domestic cities (within 3 tiles), naval ship sinkings in treacherous sea/ocean waters, cultural city flips.
+  - **Era & Golden Age Milestones:** Golden Age triggers and turn 1 empire dawn greeting.
+
+### 2. Turn Event Ticker (`src/UI/TurnEventTicker.cs`)
+- [x] **Compact Modern HUD Banner:** Positioned prominently at top center below the main menu bar (640x38px) with obsidian and Civ gold styling.
+- [x] **Cycling Notification Feed:** Shows active events with severity badges (`🚨 KRITICKÉ`, `⚠️ VAROVANIE`, `✅ ÚSPECH`, `ℹ️ INFO`), icons, and titles.
+- [x] **Interactive Navigation:** Previous/Next arrows (`◀` / `▶`), index counter (`X/Y`), 6-second auto-cycle timer, and dismiss button (`✕`).
+- [x] **1-Click Direct Action:** Clicking event headlines immediately executes context actions (centering camera on tile, opening city screen, opening tech tree, or opening relevant advisor).
+
+### 3. Full-Screen Advisor Briefing Modal (`src/UI/TurnNotificationsModal.cs`)
+- [x] **Categorized Briefing Feed:** Clean tabbed filter bar with live event counts:
+  - `Všetky`
+  - `🚨 Krízy & Varovania`
+  - `🔨 Mestá & Výroba`
+  - `🔬 Veda & Objavy`
+  - `⚔️ Vojenské správy`
+  - `💰 Hospodárstvo`
+- [x] **Advisor Speech & Atmosphere:** Each notification displays the minister in charge (Domestic, Trade, Military, Foreign, Cultural, Science), severity badges, and detailed situation briefs.
+- [x] **Integrated Action Shortcuts:**
+  - `🔍 Zamerať na mape`: Centers camera on the target tile and highlights unit or city.
+  - `🏛️ Spravovať mesto`: Opens the full City Management dialog.
+  - `🔬 Strom technológií`: Jumps straight to the Science Advisor & Tech Tree.
+  - `👥 Otvoriť poradcu`: Opens the relevant advisory minister.
+  - `Space / Medzerník`: Automatically steps through unread notifications on the map.
+  - `✓ Označiť všetky za prečítané`: Bulk marks notifications as read.
+- [x] **Auto-Trigger on Critical Events:** At turn end, any `Critical` severity events (revolts, volcanic disasters, famine, enemy sieges) immediately trigger the full advisor modal.
+
+### 4. HUD & Input Integration (`GameHud.cs`, `MapRenderer.cs`)
+- [x] **Top Bar News Counter:** `📰 Správy [N]` button with dynamic unread counter badge (`(X)` in amber gold).
+- [x] **Hotkey `N`:** Quick toggle to open/close the turn events briefing from anywhere on the map.
+- [x] **Automated Verification:** Verified 100% pass rate in `scripts/test_turn_events.ps1` and headless Monte Carlo simulation.
+
+---
+
+## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
+
+This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
+
+### Phase 48: Audio & Era-Specific Atmospheric Soundscapes (Low Priority)
 - [ ] **Era BGM Switching:**
   - Implement dynamic soundtrack switching based on the current era (Ancient, Middle Ages, Industrial, Modern).
 - [ ] **Combat & Unit Sound Effects:**

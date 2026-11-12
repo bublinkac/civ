@@ -227,7 +227,7 @@ public partial class CulturalAdvisorPanel : PanelContainer
         tableVBox.AddChild(CreateDivider(new Color(0.6f, 0.5f, 0.4f)));
 
         // Header row
-        tableVBox.AddChild(CreateCityRow("City", "Culture/Turn", "Total", "Level", true));
+        tableVBox.AddChild(CreateCityRow("City", "Culture/Turn", "Total", "Level", "Border Risk", true));
         tableVBox.AddChild(CreateDivider(new Color(0.7f, 0.65f, 0.55f)));
 
         var scrollContainer = new ScrollContainer { SizeFlagsVertical = SizeFlags.ExpandFill, SizeFlagsHorizontal = SizeFlags.ExpandFill };
@@ -240,7 +240,9 @@ public partial class CulturalAdvisorPanel : PanelContainer
         foreach (var city in sortedCities)
         {
             string level = GetCultureLevel(city.AccumulatedCulture);
-            var row = CreateCityRow(city.Name, $"+{city.CultureOutput}", city.AccumulatedCulture.ToString("N0"), level, false, alt);
+            double risk = _sim.CalculateCityCulturalFlipRisk(city, out _, out _);
+            string riskText = risk <= 0.0001 ? "Safe (0%)" : (risk < 0.02 ? $"Warn ({risk * 100:F1}%)" : $"🚨 HIGH ({risk * 100:F1}%)");
+            var row = CreateCityRow(city.Name, $"+{city.CultureOutput}", city.AccumulatedCulture.ToString("N0"), level, riskText, false, alt);
             scrollVBox.AddChild(row);
             alt = !alt;
         }
@@ -418,6 +420,15 @@ public partial class CulturalAdvisorPanel : PanelContainer
         bool allHaveMonuments = cities.All(c => c.Buildings.Any(b => b.Id == "monument"));
         bool allHaveCathedrals = cities.All(c => c.Buildings.Any(b => b.Id == "cathedral"));
 
+        // Check if any player city is under severe cultural threat
+        var threatenedCity = cities.FirstOrDefault(c => _sim.CalculateCityCulturalFlipRisk(c, out _, out _) >= 0.015);
+        if (threatenedCity != null)
+        {
+            _sim.CalculateCityCulturalFlipRisk(threatenedCity, out var threatFaction, out _);
+            string rivalCivName = threatFaction.HasValue ? _sim.GetCivilization(threatFaction.Value).Name : "a foreign power";
+            return $"Sire! Our border city of {threatenedCity.Name} is under severe cultural pressure from {rivalCivName}! Build Temples or reinforce the garrison to prevent a revolt!";
+        }
+
         if (!allHaveMonuments)
             return "I recommend building Monuments in all cities. They provide a steady stream of culture and expand our borders quickly.";
         if (!allHaveTemples)
@@ -449,7 +460,7 @@ public partial class CulturalAdvisorPanel : PanelContainer
         return new ColorRect { CustomMinimumSize = new Vector2(0, 1), Color = color };
     }
 
-    private HBoxContainer CreateCityRow(string name, string culturePerTurn, string totalCulture, string level, bool isHeader, bool altBg = false)
+    private HBoxContainer CreateCityRow(string name, string culturePerTurn, string totalCulture, string level, string flipRisk, bool isHeader, bool altBg = false)
     {
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 0);
@@ -460,10 +471,11 @@ public partial class CulturalAdvisorPanel : PanelContainer
             row.Modulate = new Color(0.96f, 0.94f, 0.9f);
         }
 
-        var nameLabel = new Label { Text = name, CustomMinimumSize = new Vector2(160, 26), HorizontalAlignment = HorizontalAlignment.Left };
-        var cptLabel = new Label { Text = culturePerTurn, CustomMinimumSize = new Vector2(100, 26), HorizontalAlignment = HorizontalAlignment.Center };
-        var totalLabel = new Label { Text = totalCulture, CustomMinimumSize = new Vector2(110, 26), HorizontalAlignment = HorizontalAlignment.Right };
-        var levelLabel = new Label { Text = level, CustomMinimumSize = new Vector2(120, 26), HorizontalAlignment = HorizontalAlignment.Center };
+        var nameLabel = new Label { Text = name, CustomMinimumSize = new Vector2(140, 26), HorizontalAlignment = HorizontalAlignment.Left };
+        var cptLabel = new Label { Text = culturePerTurn, CustomMinimumSize = new Vector2(90, 26), HorizontalAlignment = HorizontalAlignment.Center };
+        var totalLabel = new Label { Text = totalCulture, CustomMinimumSize = new Vector2(100, 26), HorizontalAlignment = HorizontalAlignment.Right };
+        var levelLabel = new Label { Text = level, CustomMinimumSize = new Vector2(110, 26), HorizontalAlignment = HorizontalAlignment.Center };
+        var riskLabel = new Label { Text = flipRisk, CustomMinimumSize = new Vector2(110, 26), HorizontalAlignment = HorizontalAlignment.Center };
 
         int fontSize = isHeader ? 12 : 13;
         var color = isHeader ? new Color(0.4f, 0.35f, 0.25f) : new Color(0.1f, 0.08f, 0.05f);
@@ -477,10 +489,21 @@ public partial class CulturalAdvisorPanel : PanelContainer
         levelLabel.AddThemeFontSizeOverride("font_size", fontSize);
         levelLabel.AddThemeColorOverride("font_color", isHeader ? color : GetCultureLevelColor(level));
 
+        riskLabel.AddThemeFontSizeOverride("font_size", fontSize);
+        Color riskColor = color;
+        if (!isHeader)
+        {
+            if (flipRisk.Contains("Safe")) riskColor = new Color(0.2f, 0.6f, 0.2f);
+            else if (flipRisk.Contains("Warn")) riskColor = new Color(0.7f, 0.5f, 0.1f);
+            else riskColor = new Color(0.85f, 0.15f, 0.15f);
+        }
+        riskLabel.AddThemeColorOverride("font_color", riskColor);
+
         row.AddChild(nameLabel);
         row.AddChild(cptLabel);
         row.AddChild(totalLabel);
         row.AddChild(levelLabel);
+        row.AddChild(riskLabel);
         return row;
     }
 }

@@ -16,6 +16,18 @@ public enum CityCaptureChoice
 public class GameSimulation
     {
         public event Action<City, Unit>? OnCityCapturePrompt;
+        public event Action<StrategicResource, int, int, City?>? OnStrategicResourceDepleted;
+        public event Action<StrategicResource, int, int, City?>? OnStrategicResourceDiscovered;
+
+        // Naval Combat, Submarines & ASW Sonar Events (Phase 45)
+        public event Action<Unit, Unit>? OnSubmarineCollision; // (movingShip, hiddenSubmarine)
+        public event Action<Unit, Unit>? OnSubmarineAmbush; // (hiddenSubmarine, movingShip)
+        public event Action<Unit, Unit, (int X, int Y)>? OnSubmarineWithdrawal; // (submarine, attacker, retreatCoord)
+        public event Action<Unit, Faction>? OnSonarContactDetected; // (detectedSubmarine, detectorFaction)
+
+        public void TriggerResourceDepleted(StrategicResource res, int x, int y, City? city) => OnStrategicResourceDepleted?.Invoke(res, x, y, city);
+        public void TriggerResourceDiscovered(StrategicResource res, int x, int y, City? city) => OnStrategicResourceDiscovered?.Invoke(res, x, y, city);
+        public TurnEventLog TurnEvents { get; } = new();
         public GameMap Map { get; }
         private Pathfinder _pathfinder;
         public Pathfinder Pathfinder => _pathfinder ??= new Pathfinder(Map, this);
@@ -35,6 +47,7 @@ public class GameSimulation
         public TechManager Research { get; } = new();
         public TechManager Player2Research { get; } = new();
         public EspionageSystem Espionage { get; private set; }
+        public bool GodMode { get; set; } = false;
 
         // Multiplayer State
         public GameMode Mode { get; set; } = GameMode.SinglePlayer;
@@ -619,6 +632,22 @@ public class GameSimulation
 
         Units.Add(new Unit("settler_1", UnitType.Settler, settlerX, settlerY, Faction.Player, PlayerCivId));
 
+        TurnEvents.AddEvent(new TurnEvent
+        {
+            Turn = 1,
+            Faction = Faction.Player,
+            Category = TurnEventCategory.Diplomacy,
+            Severity = TurnEventSeverity.Info,
+            Advisor = AdvisorType.Domestic,
+            Title = $"Úsvit civilizácie {ActiveCiv.Name}",
+            Message = $"Vítajte, vznešený vodca {ActiveCiv.LeaderName}! Váš národ hľadá úrodnú pôdu pre založenie prvého hlavného mesta. Vydajte rozkaz usadlíkom postaviť mesto stlačením [B].",
+            AdvisorQuote = "Pane, naši ľudia veria vo vašu múdrosť. Založme slávne impérium, ktoré pretrvá skúšku času!",
+            TileX = settlerX,
+            TileY = settlerY,
+            ActionType = TurnEventActionType.ZoomToTile,
+            ActionLabel = "Zamerať usadlíkov"
+        });
+
         SetupAiRivals();
 
         UpdateVisibility();
@@ -946,48 +975,55 @@ public class GameSimulation
         }
     }
 
+    public double CalculateCityCulturalFlipRisk(City city, out Faction? primaryThreatFaction, out int threatInfluence)
+    {
+        primaryThreatFaction = null;
+        threatInfluence = 0;
+        if (city.IsCapital) return 0.0;
+
+        foreach (var otherCity in Cities)
+        {
+            if (otherCity.Faction == city.Faction) continue;
+
+            int dist = Map.GetChebyshevDistance(city.X, city.Y, otherCity.X, otherCity.Y);
+            int radius = 1;
+            if (otherCity.AccumulatedCulture >= 10000) radius = 5;
+            else if (otherCity.AccumulatedCulture >= 1000) radius = 4;
+            else if (otherCity.AccumulatedCulture >= 100) radius = 3;
+            else if (otherCity.AccumulatedCulture >= 10) radius = 2;
+
+            if (dist <= radius)
+            {
+                int influence = otherCity.AccumulatedCulture / Math.Max(1, dist);
+                if (influence > threatInfluence)
+                {
+                    threatInfluence = influence;
+                    primaryThreatFaction = otherCity.Faction;
+                }
+            }
+        }
+
+        if (primaryThreatFaction.HasValue && threatInfluence > city.AccumulatedCulture)
+        {
+            // Garrison suppression (Civ3 formula: military garrison suppresses cultural revolt)
+            int garrisonCount = Units.Count(u => u.X == city.X && u.Y == city.Y && u.Faction == city.Faction && u.Domain == UnitDomain.Land);
+            double baseChance = Math.Min(0.05, (threatInfluence - city.AccumulatedCulture) / 10000.0);
+            return Math.Max(0.0, baseChance - (garrisonCount * 0.01));
+        }
+
+        return 0.0;
+    }
+
     public void CheckCulturalFlipping()
     {
         var flippedCities = new System.Collections.Generic.List<(City City, Faction NewFaction)>();
 
         foreach (var city in Cities)
         {
-            if (city.IsCapital) continue; // Capitals do not flip
-
-            var centerTile = Map.GetTile(city.X, city.Y);
-            if (centerTile == null) continue;
-
-            Faction? bestFaction = null;
-            int maxEnemyInfluence = 0;
-
-            foreach (var otherCity in Cities)
+            double flipChance = CalculateCityCulturalFlipRisk(city, out var bestFaction, out _);
+            if (flipChance > 0.0 && bestFaction.HasValue)
             {
-                if (otherCity.Faction == city.Faction) continue;
-
-                int dist = Map.GetChebyshevDistance(city.X, city.Y, otherCity.X, otherCity.Y);
-                
-                int radius = 1;
-                if (otherCity.AccumulatedCulture >= 10000) radius = 5;
-                else if (otherCity.AccumulatedCulture >= 1000) radius = 4;
-                else if (otherCity.AccumulatedCulture >= 100) radius = 3;
-                else if (otherCity.AccumulatedCulture >= 10) radius = 2;
-
-                if (dist <= radius)
-                {
-                    int influence = otherCity.AccumulatedCulture / Math.Max(1, dist);
-                    if (influence > maxEnemyInfluence)
-                    {
-                        maxEnemyInfluence = influence;
-                        bestFaction = otherCity.Faction;
-                    }
-                }
-            }
-
-            if (bestFaction.HasValue && maxEnemyInfluence > city.AccumulatedCulture)
-            {
-                // Chance to flip (max 5% per turn)
-                double chance = Math.Min(0.05, (maxEnemyInfluence - city.AccumulatedCulture) / 10000.0);
-                if (Random.Shared.NextDouble() < chance)
+                if (Random.Shared.NextDouble() < flipChance)
                 {
                     flippedCities.Add((city, bestFaction.Value));
                 }
@@ -1010,6 +1046,30 @@ public class GameSimulation
             Units.Add(guard);
 
             Console.WriteLine($"[CULTURE FLIP] The city of {city.Name} has revolted against {oldFaction} and joined {flip.NewFaction} due to cultural influence!");
+
+            if (flip.NewFaction == Faction.Player || oldFaction == Faction.Player)
+            {
+                bool isGain = flip.NewFaction == Faction.Player;
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = Faction.Player,
+                    Category = TurnEventCategory.Culture,
+                    Advisor = AdvisorType.Cultural,
+                    Severity = isGain ? TurnEventSeverity.Success : TurnEventSeverity.Critical,
+                    Icon = isGain ? "🎭" : "💔",
+                    Title = isGain ? $"{city.Name}: Kultúrny prevrat!" : $"{city.Name}: Strata mesta kultúrou!",
+                    Message = isGain 
+                        ? $"Mesto {city.Name} povstalo proti cudzej nadvláde a dobrovoľne sa pripojilo k našej ríši vďaka našej kultúrnej prestíži!"
+                        : $"Mesto {city.Name} podľahlo cudziemu kultúrnemu vplyvu a odtrhlo sa od našej ríše!",
+                    TileX = city.X,
+                    TileY = city.Y,
+                    TargetCityId = city.Id,
+                    TargetCityName = city.Name,
+                    ActionLabel = "Otvoriť mesto",
+                    ActionType = TurnEventActionType.OpenCity
+                });
+            }
         }
     }
 
@@ -1349,18 +1409,24 @@ public class GameSimulation
             }
         }
 
-        // Check hostile units on target tile
+        // Check units on target tile
         var existingUnit = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null);
-        if (existingUnit != null && IsHostile(unit, existingUnit))
+        if (existingUnit != null && existingUnit.Faction != unit.Faction)
         {
-            // Domain combat restrictions: sea units cannot melee land units on land; land cannot melee sea units in ocean
-            if (unit.Domain == UnitDomain.Sea && existingUnit.Domain == UnitDomain.Land && !tile.IsOcean)
+            // If the unit is an invisible stealth unit that moving faction has not detected:
+            // Allow the move so that it triggers Submarine Collision (Bump) or Ambush upon moving!
+            bool isHiddenStealth = existingUnit.IsStealth && !IsStealthUnitDetected(existingUnit, unit.Faction);
+            if (!isHiddenStealth)
             {
-                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
-            }
-            if (unit.Domain == UnitDomain.Land && existingUnit.Domain == UnitDomain.Sea && tile.IsOcean)
-            {
-                return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+                // Domain combat restrictions: sea units cannot melee land units on land; land cannot melee sea units in ocean
+                if (unit.Domain == UnitDomain.Sea && existingUnit.Domain == UnitDomain.Land && !tile.IsOcean)
+                {
+                    return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+                }
+                if (unit.Domain == UnitDomain.Land && existingUnit.Domain == UnitDomain.Sea && tile.IsOcean)
+                {
+                    return MoveValidationResult.Invalid(MoveValidationFailureReason.TargetTileImpassable);
+                }
             }
         }
 
@@ -1392,12 +1458,64 @@ public class GameSimulation
             }
         }
 
-        // Check if there is an enemy unit on the target tile
-        var enemyUnit = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null);
-        if (enemyUnit != null && IsHostile(unit, enemyUnit))
+        // Check for stealth submarine bump or ambush
+        var targetStealthSub = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && 
+                                               u.Faction != unit.Faction && u.IsStealth);
+        if (targetStealthSub != null && !IsStealthUnitDetected(targetStealthSub, unit.Faction))
         {
+            // Reveal the submarine to the moving unit's faction
+            targetStealthSub.RevealTo(unit.Faction);
+
+            if (IsHostile(unit, targetStealthSub))
+            {
+                // Submarine Ambush during war!
+                Console.WriteLine($"[Submarine Ambush] {unit.Type} stumbled upon submerged {targetStealthSub.Type} at ({targetX}, {targetY})!");
+                OnSubmarineAmbush?.Invoke(targetStealthSub, unit);
+                ResolveCombat(unit, targetStealthSub);
+                CheckSonarDetection(unit);
+                UpdateVisibility();
+
+                var survivingUnit = Units.Find(u => u.X == targetX && u.Y == targetY);
+                if (survivingUnit != null)
+                {
+                    CheckCityCapture(survivingUnit, targetX, targetY);
+                }
+
+                CheckGameEndConditions();
+                return true;
+            }
+            else
+            {
+                // Submarine Bump Collision during peace!
+                Console.WriteLine($"[Submarine Bump] {unit.Type} collided with submerged {targetStealthSub.Type} at ({targetX}, {targetY})! Movement halted.");
+                unit.RemainingMovement = Math.Max(0.0f, unit.RemainingMovement - 1.0f);
+                OnSubmarineCollision?.Invoke(unit, targetStealthSub);
+                CheckSonarDetection(unit);
+                UpdateVisibility();
+                return true;
+            }
+        }
+
+        // Check if there is an enemy/foreign unit on the target tile
+        var enemyUnit = Units.Find(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && u.Faction != unit.Faction);
+        if (enemyUnit != null)
+        {
+            // If they are not at war and neither has hidden nationality, this attack declares WAR!
+            if (!IsAtWar(unit.Faction, enemyUnit.Faction) && !unit.HasHiddenNationality && !enemyUnit.HasHiddenNationality)
+            {
+                DeclareWar(unit.Faction, enemyUnit.Faction);
+                if (unit.Faction == Faction.Player || enemyUnit.Faction == Faction.Player)
+                {
+                    OnWarDeclared(isDefensive: enemyUnit.Faction == Faction.Player);
+                }
+                var unitCiv = GetCivilization(unit.Faction);
+                var enemyCiv = GetCivilization(enemyUnit.Faction);
+                Console.WriteLine($"[Diplomacy] WAR declared! {unitCiv.Name} unit {unit.Type} attacked {enemyCiv.Name}'s {enemyUnit.Type} at ({targetX}, {targetY})!");
+            }
+
             // Trigger Combat!
             ResolveCombat(unit, enemyUnit);
+            CheckSonarDetection(unit);
             UpdateVisibility();
 
             // Check for city capture if defender died and attacker advanced to that tile
@@ -1455,6 +1573,7 @@ public class GameSimulation
         CheckCityCapture(unit, targetX, targetY);
 
         UpdateVisibility();
+        CheckSonarDetection(unit);
 
         CheckGameEndConditions();
         return true;
@@ -1579,6 +1698,102 @@ public class GameSimulation
         if (a.HasHiddenNationality || b.HasHiddenNationality) return true;
 
         return IsAtWar(a.Faction, b.Faction);
+    }
+
+    /// <summary>
+    /// Evaluates whether an opposing stealth unit (e.g. Submarine, Stealth Bomber) is detected
+    /// by the given faction through Sonar, close visual quarters, harbor surveillance, or collision.
+    /// </summary>
+    public bool IsStealthUnitDetected(Unit stealthUnit, Faction viewerFaction)
+    {
+        if (!stealthUnit.IsStealth) return true;
+        if (stealthUnit.Faction == viewerFaction) return true;
+
+        // GodMode or Spectator omniscient vision reveals all units
+        if (GodMode) return true;
+
+        // Recently bumped, attacked, or revealed
+        if (stealthUnit.IsTemporarilyRevealedTo(viewerFaction)) return true;
+
+        // Active Sonar detection: Any unit of viewerFaction with DetectsStealth within Chebyshev distance <= 2
+        bool sonarDetected = Units.Any(u => u.Faction == viewerFaction && u.TransportUnitId == null && u.DetectsStealth && Map.GetChebyshevDistance(u.X, u.Y, stealthUnit.X, stealthUnit.Y) <= 2);
+        if (sonarDetected) return true;
+
+        // Port / Harbor radar: Friendly city within Chebyshev distance <= 1
+        bool portDetected = Cities.Any(c => c.Faction == viewerFaction && Map.GetChebyshevDistance(c.X, c.Y, stealthUnit.X, stealthUnit.Y) <= 1);
+        if (portDetected) return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Scans for stealth units near movingUnit and triggers Sonar Contact events if newly detected.
+    /// </summary>
+    public void CheckSonarDetection(Unit movingUnit)
+    {
+        if (movingUnit.TransportUnitId != null) return;
+
+        // Case 1: movingUnit has ASW Sonar (DetectsStealth)
+        if (movingUnit.DetectsStealth)
+        {
+            foreach (var stealthUnit in Units.Where(u => u.IsStealth && u.Faction != movingUnit.Faction && u.TransportUnitId == null))
+            {
+                if (Map.GetChebyshevDistance(movingUnit.X, movingUnit.Y, stealthUnit.X, stealthUnit.Y) <= 2)
+                {
+                    if (!stealthUnit.IsTemporarilyRevealedTo(movingUnit.Faction))
+                    {
+                        stealthUnit.RevealTo(movingUnit.Faction);
+                        Console.WriteLine($"[ASW Sonar] {movingUnit.Type} ({movingUnit.Faction}) detected submerged {stealthUnit.Type} ({stealthUnit.Faction}) at ({stealthUnit.X}, {stealthUnit.Y}) via active sonar!");
+                        OnSonarContactDetected?.Invoke(stealthUnit, movingUnit.Faction);
+                    }
+                }
+            }
+        }
+
+        // Case 2: movingUnit is a stealth submarine that entered the sonar bubble of an enemy ASW ship
+        if (movingUnit.IsStealth)
+        {
+            foreach (var detector in Units.Where(u => u.DetectsStealth && u.Faction != movingUnit.Faction && u.TransportUnitId == null))
+            {
+                if (Map.GetChebyshevDistance(movingUnit.X, movingUnit.Y, detector.X, detector.Y) <= 2)
+                {
+                    if (!movingUnit.IsTemporarilyRevealedTo(detector.Faction))
+                    {
+                        movingUnit.RevealTo(detector.Faction);
+                        Console.WriteLine($"[ASW Sonar] Submerged {movingUnit.Type} ({movingUnit.Faction}) detected by {detector.Type} ({detector.Faction}) active sonar at ({movingUnit.X}, {movingUnit.Y})!");
+                        OnSonarContactDetected?.Invoke(movingUnit, detector.Faction);
+                    }
+                }
+            }
+        }
+    }
+
+    private (int X, int Y)? FindSubmarineEscapeTile(Unit submarine, int fromX, int fromY)
+    {
+        var candidates = new List<(int X, int Y)>();
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int tx = Map.NormalizeX(submarine.X + dx);
+                int ty = submarine.Y + dy;
+                if (!Map.IsInBounds(tx, ty)) continue;
+                if (tx == fromX && ty == fromY) continue; // Do not retreat towards the attacker
+
+                var tile = Map.GetTile(tx, ty);
+                if (tile == null || !tile.IsOcean) continue;
+
+                // Cannot escape to a tile occupied by hostile units
+                bool hasHostile = Units.Any(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && IsHostile(submarine, u));
+                if (hasHostile) continue;
+
+                candidates.Add((tx, ty));
+            }
+        }
+
+        if (candidates.Count == 0) return null;
+        return candidates[Random.Shared.Next(candidates.Count)];
     }
 
     public float GetTileMovementCostForUnit(TileData tile, Unit unit)
@@ -1720,6 +1935,42 @@ public class GameSimulation
         }
 
         // 3. Resolve Deaths and Advances
+        int oldDefX = defender.X;
+        int oldDefY = defender.Y;
+
+        // Submarine Tactical Withdrawal (Emergency Deep Dive, Civ3):
+        // If defending submarine would take fatal damage, and attacker lacks ASW Sonar (DetectsStealth == false),
+        // it has a 50% chance (65% for Elite) to perform an emergency dive and escape to an adjacent safe water tile with 1 HP.
+        bool defenderSubmarineWithdrew = false;
+        if (defender.Health <= 0 && defender.IsStealth && defender.Domain == UnitDomain.Sea && !attacker.DetectsStealth)
+        {
+            int retreatChance = defender.Experience == ExperienceLevel.Elite ? 65 : 50;
+            if (Random.Shared.Next(100) < retreatChance)
+            {
+                var escapeTile = FindSubmarineEscapeTile(defender, attacker.X, attacker.Y);
+                if (escapeTile.HasValue)
+                {
+                    defender.Health = 1;
+                    defender.MoveTo(escapeTile.Value.X, escapeTile.Value.Y, 0);
+                    defender.Submerge();
+                    defenderSubmarineWithdrew = true;
+                    Console.WriteLine($"[Submarine Withdrawal] {defender.Type} dove deep and escaped fatal damage from {attacker.Type} to ({escapeTile.Value.X}, {escapeTile.Value.Y}) with 1 HP!");
+                    OnSubmarineWithdrawal?.Invoke(defender, attacker, escapeTile.Value);
+                }
+            }
+        }
+
+        // Submarine attacker retreat: if attacker is submarine and takes fatal damage against a non-ASW defender
+        if (attacker.Health <= 0 && attacker.IsStealth && attacker.Domain == UnitDomain.Sea && !defender.DetectsStealth && defender.Health > 0)
+        {
+            if (Random.Shared.Next(100) < 50)
+            {
+                attacker.Health = 1;
+                attacker.Submerge();
+                Console.WriteLine($"[Submarine Withdrawal] Attacking {attacker.Type} aborted attack run and dove deep with 1 HP remaining!");
+            }
+        }
+
         // Retreat logic for fast units (Civ3)
         if (attacker.Health <= 0 && attacker.MaxMovement > 1 && defender.MaxMovement <= 1 && defender.Health > 0)
         {
@@ -1730,21 +1981,24 @@ public class GameSimulation
         bool defenderDied = defender.Health <= 0;
         bool attackerDied = attacker.Health <= 0;
 
-        if (defenderDied)
+        if (defenderDied || defenderSubmarineWithdrew)
         {
-            Console.WriteLine($"[Combat] {defender.Type} has been destroyed!");
-            DestroyUnit(defender);
+            if (defenderDied)
+            {
+                Console.WriteLine($"[Combat] {defender.Type} has been destroyed!");
+                DestroyUnit(defender);
 
-            // War weariness: +2 when losing a unit
-            if (defender.Faction == Faction.Player)
-                AddWarWearinessPoints(2);
+                // War weariness: +2 when losing a unit (not applicable for Privateers)
+                if (defender.Faction == Faction.Player && !defender.HasHiddenNationality && !attacker.HasHiddenNationality)
+                    AddWarWearinessPoints(2);
+            }
 
-            // Attacker advances onto the defender's tile upon victory and is registered as victorious
+            // Attacker advances onto the defender's old tile upon victory and is registered as victorious
             if (!attackerDied)
             {
-                var tile = Map.GetTile(defender.X, defender.Y)!;
+                var tile = Map.GetTile(oldDefX, oldDefY)!;
                 float moveCost = GetTileMovementCostForUnit(tile, attacker);
-                attacker.MoveTo(defender.X, defender.Y, moveCost);
+                attacker.MoveTo(oldDefX, oldDefY, moveCost);
                 
                 // Synchronize cargo positions if attacker is a transport
                 if (attacker.LoadedUnitIds.Count > 0)
@@ -1754,13 +2008,13 @@ public class GameSimulation
                         var cargo = Units.Find(u => u.Id == cargoId);
                         if (cargo != null)
                         {
-                            cargo.X = defender.X;
-                            cargo.Y = defender.Y;
+                            cargo.X = oldDefX;
+                            cargo.Y = oldDefY;
                         }
                     }
                 }
 
-                Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({defender.X}, {defender.Y})!");
+                Console.WriteLine($"[Combat] {attacker.Type} wins and advances to ({oldDefX}, {oldDefY})!");
                 
                 HandleCombatVictory(attacker);
             }
@@ -1771,12 +2025,12 @@ public class GameSimulation
             Console.WriteLine($"[Combat] {attacker.Type} has been destroyed in battle!");
             DestroyUnit(attacker);
 
-            // War weariness: +2 when losing a unit
-            if (attacker.Faction == Faction.Player)
+            // War weariness: +2 when losing a unit (not applicable for Privateers)
+            if (attacker.Faction == Faction.Player && !attacker.HasHiddenNationality && !defender.HasHiddenNationality)
                 AddWarWearinessPoints(2);
             
             // Defender wins and is registered as victorious
-            if (!defenderDied)
+            if (!defenderDied && !defenderSubmarineWithdrew)
             {
                 HandleCombatVictory(defender);
             }
@@ -1956,6 +2210,26 @@ public class GameSimulation
                 if (Random.Shared.Next(100) < sinkChance)
                 {
                     Console.WriteLine($"[Naval Sinking] {ship.Type} ({ship.Faction}) sank in treacherous waters of {tile.Terrain.Name} at ({ship.X}, {ship.Y})!");
+                    
+                    if (ship.Faction == Faction.Player)
+                    {
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = Faction.Player,
+                            Category = TurnEventCategory.Military,
+                            Advisor = AdvisorType.Military,
+                            Severity = TurnEventSeverity.Warning,
+                            Icon = "🌊",
+                            Title = "Stroskotanie lode v hlbinách",
+                            Message = $"Naše plavidlo {ship.Type} stroskotalo v búrlivých vodách ({tile.Terrain.Name}) na pozícii ({ship.X}, {ship.Y}) a potopilo sa!",
+                            TileX = ship.X,
+                            TileY = ship.Y,
+                            ActionLabel = "Zobraziť miesto",
+                            ActionType = TurnEventActionType.ZoomToTile
+                        });
+                    }
+
                     DestroyUnit(ship);
                 }
             }
@@ -1997,7 +2271,7 @@ public class GameSimulation
         int dist = Map.GetChebyshevDistance(targetX, targetY, unit.X, unit.Y);
         if (dist > unit.BombardRange || dist == 0) return false;
 
-        var targets = Units.Where(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && IsHostile(unit, u)).ToList();
+        var targets = Units.Where(u => u.X == targetX && u.Y == targetY && u.TransportUnitId == null && IsHostile(unit, u) && (!u.IsStealth || IsStealthUnitDetected(u, unit.Faction))).ToList();
         var enemyCity = Cities.Find(c => c.X == targetX && c.Y == targetY && c.Faction != unit.Faction && IsHostileToFaction(unit.Faction, c.Faction));
         var targetTile = Map.GetTile(targetX, targetY);
 
@@ -2967,6 +3241,8 @@ public class GameSimulation
 
     public void AdvanceWorldTurn()
     {
+        TurnNumber++;
+
         // 3. Advance Worker Construction
         ProcessWorkerConstruction();
 
@@ -2978,6 +3254,9 @@ public class GameSimulation
 
         // 3.6 Process Volcanic Eruptions (0.35% chance per turn per volcano)
         VolcanoSystem.ProcessEruptions(this);
+
+        // 3.6.5 Process Strategic Resource Depletion & Discovery (Civ3 mechanics)
+        ResourceDepletionSystem.ProcessResourceDynamics(this);
 
         // 3.7 Process War Weariness (Civ3 mechanic)
         ProcessWarWeariness();
@@ -2992,6 +3271,20 @@ public class GameSimulation
                 var newGov = Government.Get(PlayerGovernment);
                 Console.WriteLine($"[Government] Anarchy has ended! Your civilization is now a {newGov.Name}.");
                 PendingGovernment = null;
+
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = Faction.Player,
+                    Category = TurnEventCategory.Diplomacy,
+                    Advisor = AdvisorType.Domestic,
+                    Severity = TurnEventSeverity.Success,
+                    Icon = "⚖️",
+                    Title = "Koniec anarchie!",
+                    Message = $"V ríši bol obnovený poriadok a ústava. Štátnym zriadením je teraz {newGov.Name}.",
+                    ActionLabel = "Otvoriť vládu",
+                    ActionType = TurnEventActionType.OpenAdvisor
+                });
             }
         }
 
@@ -3007,7 +3300,6 @@ public class GameSimulation
         // 3.11 Process active trade deals
         Diplomacy.ProcessTurnEnd();
 
-        TurnNumber++;
         CalculateTradeNetworks();
 
         UpdateUnitMovementBonuses();
@@ -3029,8 +3321,73 @@ public class GameSimulation
 
         UpdateVisibility();
 
-        // 4. Check for game end conditions
+        // 4. Hostile military sightings near player cities
+        CheckMilitarySightings();
+
+        // 5. Idle research warning
+        if (Research.CurrentResearch == null)
+        {
+            TurnEvents.AddEvent(new TurnEvent
+            {
+                Turn = TurnNumber,
+                Faction = Faction.Player,
+                Category = TurnEventCategory.Science,
+                Advisor = AdvisorType.Science,
+                Severity = TurnEventSeverity.Warning,
+                Icon = "💡",
+                Title = "Výskum nie je nastavený",
+                Message = "Naši vedci nepracujú na žiadnom projekte! Výskumný potenciál ríše sa stráca. Zvoľte novú technológiu.",
+                ActionLabel = "Vybrať výskum",
+                ActionType = TurnEventActionType.OpenTechTree
+            });
+        }
+
+        TurnEvents.NotifyTurnCompleted(TurnNumber, ActiveTurnFaction);
+
+        // 6. Check for game end conditions
         CheckGameEndConditions();
+    }
+
+    private void CheckMilitarySightings()
+    {
+        var playerCities = Cities.Where(c => c.Faction == Faction.Player).ToList();
+        var threats = new HashSet<string>();
+
+        foreach (var city in playerCities)
+        {
+            var nearbyEnemies = Units.Where(u =>
+                (u.Faction == Faction.Barbarian || (u.Faction.IsAi() && IsAtWar(Faction.Player, u.Faction))) &&
+                Map.GetChebyshevDistance(city.X, city.Y, u.X, u.Y) <= 3
+            ).ToList();
+
+            if (nearbyEnemies.Count > 0)
+            {
+                var closest = nearbyEnemies.OrderBy(u => Map.GetChebyshevDistance(city.X, city.Y, u.X, u.Y)).First();
+                string threatKey = $"{city.Id}_{closest.Faction}";
+                if (!threats.Contains(threatKey))
+                {
+                    threats.Add(threatKey);
+                    int dist = Map.GetChebyshevDistance(city.X, city.Y, closest.X, closest.Y);
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = Faction.Player,
+                        Category = TurnEventCategory.Military,
+                        Advisor = AdvisorType.Military,
+                        Severity = TurnEventSeverity.Warning,
+                        Icon = "⚔️",
+                        Title = $"Hrozba pri meste {city.Name}!",
+                        Message = $"Vojenská hliadka spozorovala nepriateľské jednotky ({closest.Type}, frakcia {closest.Faction}) vo vzdialenosti {dist} políčok od mesta {city.Name}!",
+                        TileX = closest.X,
+                        TileY = closest.Y,
+                        TargetCityId = city.Id,
+                        TargetCityName = city.Name,
+                        ActionLabel = "Zamerať nepriateľa",
+                        ActionType = TurnEventActionType.ZoomToTile
+                    });
+                }
+            }
+        }
     }
 
     private void ProcessDisease()
@@ -3066,6 +3423,24 @@ public class GameSimulation
                         city.Population -= 1;
                         city.StoredFood = 0;
                         Console.WriteLine($"[DISEASE] Disease struck the city of {city.Name}, killing 1 population!");
+
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = city.Faction,
+                            Category = TurnEventCategory.Disaster,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Warning,
+                            Icon = "🌿",
+                            Title = $"{city.Name}: Prepuknutie moru",
+                            Message = $"V meste {city.Name} z okolitých močiarov prepukla nákaza! Mesto stratilo 1 obyvateľa a zásoby jedla.",
+                            TileX = city.X,
+                            TileY = city.Y,
+                            TargetCityId = city.Id,
+                            TargetCityName = city.Name,
+                            ActionLabel = "Otvoriť mesto",
+                            ActionType = TurnEventActionType.OpenCity
+                        });
                     }
                 }
             }
@@ -3303,6 +3678,23 @@ public class GameSimulation
         if (matchesTrait1 && matchesTrait2)
         {
             ga.Trigger(civ.Name, $"Built {wonder.Name} (matches {civ.Trait1} + {civ.Trait2})");
+
+            if (faction == Faction.Player)
+            {
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = Faction.Player,
+                    Category = TurnEventCategory.Economy,
+                    Advisor = AdvisorType.Domestic,
+                    Severity = TurnEventSeverity.Success,
+                    Icon = "✨",
+                    Title = "Zlatý vek začína!",
+                    Message = $"Postavenie divu {wonder.Name} vyvolalo 20-ťahový Zlatý vek našej ríše! Všetky pracujúce polia získavajú bonus +1 produkciu a +1 obchod.",
+                    ActionLabel = "Prehľad ríše",
+                    ActionType = TurnEventActionType.OpenAdvisor
+                });
+            }
         }
     }
 
@@ -3325,6 +3717,23 @@ public class GameSimulation
         if (isUniqueUnit)
         {
             ga.Trigger(civ.Name, $"{civ.UniqueUnitName} won in combat");
+
+            if (winner.Faction == Faction.Player)
+            {
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = Faction.Player,
+                    Category = TurnEventCategory.Economy,
+                    Advisor = AdvisorType.Domestic,
+                    Severity = TurnEventSeverity.Success,
+                    Icon = "✨",
+                    Title = "Zlatý vek začína!",
+                    Message = $"Slávne víťazstvo našej unikátnej jednotky {civ.UniqueUnitName} v boji inšpirovalo celý národ! Začína 20-ťahový Zlatý vek.",
+                    ActionLabel = "Prehľad ríše",
+                    ActionType = TurnEventActionType.OpenAdvisor
+                });
+            }
         }
     }
 
@@ -4099,12 +4508,46 @@ public class GameSimulation
                 city.DisorderTurns++;
                 Console.WriteLine($"[REVOLT] {city.Name} is in Civil Disorder (turn {city.DisorderTurns})! Production, Commerce and Growth HALTED.");
 
+                if (city.DisorderTurns == 1 && city.Faction == Faction.Player)
+                {
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = city.Faction,
+                        Category = TurnEventCategory.Disorder,
+                        Advisor = AdvisorType.Domestic,
+                        Severity = TurnEventSeverity.Critical,
+                        Icon = "⚡",
+                        Title = $"{city.Name}: Vzbura v meste!",
+                        Message = $"V meste {city.Name} vypukli nepokoje! Nespokojní občania odmietajú pracovať. Výroba, veda a obchod sú kompletne zastavené.",
+                        TileX = city.X,
+                        TileY = city.Y,
+                        TargetCityId = city.Id,
+                        TargetCityName = city.Name,
+                        ActionLabel = "Riešiť vzburu",
+                        ActionType = TurnEventActionType.OpenCity
+                    });
+                }
+
                 // Democracy: 3+ turns of continuous disorder → automatic revolution to Anarchy→Despotism
                 if (city.Faction == Faction.Player && PlayerGovernment == GovernmentType.Democracy && city.DisorderTurns >= 3)
                 {
                     if (!IsInAnarchy)
                     {
                         Console.WriteLine($"[REVOLUTION] Prolonged civil disorder in {city.Name} has caused your Democracy to collapse!");
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = Faction.Player,
+                            Category = TurnEventCategory.Disorder,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Critical,
+                            Icon = "🔥",
+                            Title = "Pád demokracie!",
+                            Message = $"Dlhotrvajúce nepokoje v meste {city.Name} spôsobili kolaps našej vlády! Celá ríša upadla do anarchie.",
+                            ActionLabel = "Otvoriť vládu",
+                            ActionType = TurnEventActionType.OpenAdvisor
+                        });
                         AnarchyTurnsRemaining = 4;
                         PendingGovernment = GovernmentType.Despotism;
                     }
@@ -4126,6 +4569,27 @@ public class GameSimulation
                 {
                     targetTile.IsPolluted = true;
                     Console.WriteLine($"[POLLUTION] Active pollution has erupted at ({targetTile.X}, {targetTile.Y}) near {city.Name}! The tile yields nothing until cleaned.");
+
+                    if (city.Faction == Faction.Player)
+                    {
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = city.Faction,
+                            Category = TurnEventCategory.Disaster,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Warning,
+                            Icon = "☣️",
+                            Title = $"{city.Name}: Priemyselné znečistenie",
+                            Message = $"Pole na pozícii ({targetTile.X}, {targetTile.Y}) pri meste {city.Name} zamoril toxický odpad. Pošlite robotníkov pole vyčistiť.",
+                            TileX = targetTile.X,
+                            TileY = targetTile.Y,
+                            TargetCityId = city.Id,
+                            TargetCityName = city.Name,
+                            ActionLabel = "Zobraziť pole",
+                            ActionType = TurnEventActionType.ZoomToTile
+                        });
+                    }
                 }
             }
 
@@ -4157,10 +4621,11 @@ public class GameSimulation
                     city.Population++;
 
                     // Granary preserves a percentage of the required food on growth
+                    int preservedFood = 0;
                     if (city.HasBuilding<Granary>())
                     {
                         float ratio = city.GetBuilding<Granary>()?.FoodKeepRatio ?? 0.5f;
-                        int preservedFood = (int)(needed * ratio);
+                        preservedFood = (int)(needed * ratio);
                         city.StoredFood = preservedFood + overflow;
                         Console.WriteLine($"[City Growth] {city.Name} has grown! Population is now {city.Population}. Granary preserved {preservedFood} food!");
                     }
@@ -4169,11 +4634,53 @@ public class GameSimulation
                         city.StoredFood = overflow;
                         Console.WriteLine($"[City Growth] {city.Name} has grown! Population is now {city.Population}.");
                     }
+
+                    if (city.Faction == Faction.Player)
+                    {
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = city.Faction,
+                            Category = TurnEventCategory.Growth,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Info,
+                            Icon = "🌾",
+                            Title = $"{city.Name}: Rast populácie",
+                            Message = $"Mesto {city.Name} sa rozrástlo na veľkosť {city.Population}. " + (preservedFood > 0 ? $"Sýpka uchovala {preservedFood} zásob jedla." : ""),
+                            TileX = city.X,
+                            TileY = city.Y,
+                            TargetCityId = city.Id,
+                            TargetCityName = city.Name,
+                            ActionLabel = "Otvoriť mesto",
+                            ActionType = TurnEventActionType.OpenCity
+                        });
+                    }
                 }
                 else
                 {
                     city.StoredFood = city.FoodNeededForGrowth; // Cap food if at pop cap
                     Console.WriteLine($"[City Growth] {city.Name} cannot grow further (Pop Cap: {popCap})");
+
+                    if (city.Faction == Faction.Player)
+                    {
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = city.Faction,
+                            Category = TurnEventCategory.Growth,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Warning,
+                            Icon = "🏙️",
+                            Title = $"{city.Name}: Limit rastu dosiahnutý",
+                            Message = $"Mesto {city.Name} dosiahlo maximálnu veľkosť {popCap} bez potrebnej infraštruktúry. Pre ďalší rast postavte {(popCap == 6 ? "Akvadukt" : "Nemocnicu")}.",
+                            TileX = city.X,
+                            TileY = city.Y,
+                            TargetCityId = city.Id,
+                            TargetCityName = city.Name,
+                            ActionLabel = "Otvoriť mesto",
+                            ActionType = TurnEventActionType.OpenCity
+                        });
+                    }
                 }
             }
             else if (city.StoredFood < 0)
@@ -4196,6 +4703,27 @@ public class GameSimulation
                     else
                     {
                         Console.WriteLine($"[Famine] {city.Name} has starved! Population shrank to {city.Population}.");
+                    }
+
+                    if (city.Faction == Faction.Player)
+                    {
+                        TurnEvents.AddEvent(new TurnEvent
+                        {
+                            Turn = TurnNumber,
+                            Faction = city.Faction,
+                            Category = TurnEventCategory.Growth,
+                            Advisor = AdvisorType.Domestic,
+                            Severity = TurnEventSeverity.Critical,
+                            Icon = "💀",
+                            Title = $"{city.Name}: Hladomor v meste!",
+                            Message = $"Mesto {city.Name} trpí akútnym nedostatkom jedla! Populácia klesla na {city.Population}." + (destroyCandidate != null ? $" Budova {destroyCandidate.Name} bola zničená!" : ""),
+                            TileX = city.X,
+                            TileY = city.Y,
+                            TargetCityId = city.Id,
+                            TargetCityName = city.Name,
+                            ActionLabel = "Otvoriť mesto",
+                            ActionType = TurnEventActionType.OpenCity
+                        });
                     }
                 }
                 else
@@ -4297,9 +4825,40 @@ public class GameSimulation
             if (disbandCandidate != null)
             {
                 Console.WriteLine($"[Economy] BANKRUPT! Disbanded {disbandCandidate.Type} at ({disbandCandidate.X}, {disbandCandidate.Y}) due to lack of treasury!");
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = Faction.Player,
+                    Category = TurnEventCategory.Economy,
+                    Advisor = AdvisorType.Domestic,
+                    Severity = TurnEventSeverity.Critical,
+                    Icon = "💸",
+                    Title = "Štátny bankrot!",
+                    Message = $"Štátna pokladnica je prázdna! Pre neschopnosť vyplácať žold bola rozpustená jednotka {disbandCandidate.Type}.",
+                    TileX = disbandCandidate.X,
+                    TileY = disbandCandidate.Y,
+                    ActionLabel = "Domáci poradca",
+                    ActionType = TurnEventActionType.OpenAdvisor
+                });
                 Units.Remove(disbandCandidate);
             }
             PlayerTreasury = 0;
+        }
+        else if (PlayerTreasury < 15 && goldGain < 0)
+        {
+            TurnEvents.AddEvent(new TurnEvent
+            {
+                Turn = TurnNumber,
+                Faction = Faction.Player,
+                Category = TurnEventCategory.Economy,
+                Advisor = AdvisorType.Domestic,
+                Severity = TurnEventSeverity.Warning,
+                Icon = "💰",
+                Title = "Nízke zásoby zlata",
+                Message = $"Štátna pokladnica má iba {PlayerTreasury} zlata pri deficite {goldGain}g/ťah! Hrozí bankrot ríše. Upravte dane v domácom poradcovi (F1).",
+                ActionLabel = "Upraviť dane",
+                ActionType = TurnEventActionType.OpenAdvisor
+            });
         }
 
         // Wall Street effect: +5% interest on player's treasury (capped at 50 gold per turn)
@@ -4436,6 +4995,23 @@ public class GameSimulation
                 {
                     BuiltSpaceshipParts.Add(project);
                     Console.WriteLine($"[Space Race] {city.Name} completed spaceship part: {project}. ({BuiltSpaceshipParts.Count}/{AllSpaceshipParts.Count})");
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = city.Faction,
+                        Category = TurnEventCategory.Science,
+                        Advisor = AdvisorType.Science,
+                        Severity = TurnEventSeverity.Success,
+                        Icon = "🚀",
+                        Title = $"{city.Name}: Vesmírny modul",
+                        Message = $"Mesto {city.Name} dokončilo komponent vesmírnej lode: {project} ({BuiltSpaceshipParts.Count}/{AllSpaceshipParts.Count}).",
+                        TileX = city.X,
+                        TileY = city.Y,
+                        TargetCityId = city.Id,
+                        TargetCityName = city.Name,
+                        ActionLabel = "Otvoriť mesto",
+                        ActionType = TurnEventActionType.OpenCity
+                    });
                 }
                 else if (city.Faction == Faction.AiRival)
                 {
@@ -4449,6 +5025,43 @@ public class GameSimulation
                 city.Buildings.Add(wonder);
                 System.Console.WriteLine($"[Production] {city.Name} has completed building a Wonder: {wonder.Name}!");
                 wonder.OnCompleted(city, this);
+
+                if (city.Faction == Faction.Player)
+                {
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = city.Faction,
+                        Category = TurnEventCategory.Wonder,
+                        Advisor = AdvisorType.Cultural,
+                        Severity = TurnEventSeverity.Success,
+                        Icon = "⭐",
+                        Title = $"{wonder.Name} dokončený!",
+                        Message = $"V meste {city.Name} bol veľkolepo dokončený div sveta: {wonder.Name}! Sláva našej ríše prekročila hranice kontinentu.",
+                        TileX = city.X,
+                        TileY = city.Y,
+                        TargetCityId = city.Id,
+                        TargetCityName = city.Name,
+                        ActionLabel = "Otvoriť mesto",
+                        ActionType = TurnEventActionType.OpenCity
+                    });
+                }
+                else if (city.Faction.IsAi())
+                {
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = Faction.Player,
+                        Category = TurnEventCategory.Wonder,
+                        Advisor = AdvisorType.Foreign,
+                        Severity = TurnEventSeverity.Info,
+                        Icon = "🌟",
+                        Title = $"Cudzí div: {wonder.Name}",
+                        Message = $"Zahraniční vyslanci hlásia, že cudzí národ dokončil výstavbu divu sveta {wonder.Name} v meste {city.Name}.",
+                        ActionLabel = "Prehľad divov",
+                        ActionType = TurnEventActionType.OpenAdvisor
+                    });
+                }
 
                 // Diplomatic victory: builder of United Nations with majority pop wins
                 if (buildingId == "united_nations")
@@ -4492,6 +5105,27 @@ public class GameSimulation
                 city.Buildings.Add(building);
                 System.Console.WriteLine($"[Production] {city.Name} has completed building a {building.Name}!");
                 building.OnCompleted(city, this);
+
+                if (city.Faction == Faction.Player)
+                {
+                    TurnEvents.AddEvent(new TurnEvent
+                    {
+                        Turn = TurnNumber,
+                        Faction = city.Faction,
+                        Category = TurnEventCategory.Production,
+                        Advisor = AdvisorType.Domestic,
+                        Severity = TurnEventSeverity.Success,
+                        Icon = "🏛️",
+                        Title = $"{city.Name}: {building.Name} dokončená",
+                        Message = $"Mesto {city.Name} úspešne dokončilo stavbu budovy {building.Name}. {building.GetDescription()}",
+                        TileX = city.X,
+                        TileY = city.Y,
+                        TargetCityId = city.Id,
+                        TargetCityName = city.Name,
+                        ActionLabel = "Otvoriť mesto",
+                        ActionType = TurnEventActionType.OpenCity
+                    });
+                }
             }
         }
         if (project != ProductionProject.None && buildingId == null)
@@ -4534,6 +5168,27 @@ public class GameSimulation
 
             Units.Add(unit);
             System.Console.WriteLine($"[Production] {city.Name} has completed building a {type}!");
+
+            if (city.Faction == Faction.Player)
+            {
+                TurnEvents.AddEvent(new TurnEvent
+                {
+                    Turn = TurnNumber,
+                    Faction = city.Faction,
+                    Category = TurnEventCategory.Production,
+                    Advisor = AdvisorType.Military,
+                    Severity = TurnEventSeverity.Success,
+                    Icon = "⚔️",
+                    Title = $"{city.Name}: {type} pripravený",
+                    Message = $"V meste {city.Name} bol úspešne dokončený výcvik jednotky {type}. Jednotka čaká na vaše rozkazy.",
+                    TileX = city.X,
+                    TileY = city.Y,
+                    TargetCityId = city.Id,
+                    TargetCityName = city.Name,
+                    ActionLabel = "Zamerať jednotku",
+                    ActionType = TurnEventActionType.ZoomToTile
+                });
+            }
         }
 
         if (city.ProductionQueue.Count > 0)
@@ -4620,9 +5275,16 @@ public class GameSimulation
         return true;
     }
 
-    // Helper to check if city has access to a strategic/luxury resource via Trade Network
+    // Helper to check if city has access to a strategic/luxury resource via Trade Network or Treaties
     public bool CityHasResourceAccess(City city, string resourceId)
     {
+        // 1. Check if resource is delivered via active bilateral trade agreements
+        if (Diplomacy != null && Diplomacy.HasTradedResource(city.Faction, resourceId))
+        {
+            return true;
+        }
+
+        // 2. Check domestic road/railroad trade network
         if (CityTradeNetworks.TryGetValue(city.Id, out int networkId))
         {
             if (TradeNetworkResources.TryGetValue(networkId, out var resources))

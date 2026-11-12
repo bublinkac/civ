@@ -293,17 +293,95 @@ public partial class TradeAdvisorPanel : PanelContainer
             resVBox.AddChild(noBonus);
         }
 
-        // Trade deals placeholder
+        // Active Trade Deals section
         resVBox.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
         resVBox.AddChild(CreateDivider(new Color(0.6f, 0.5f, 0.35f)));
-        var dealsTitle = new Label { Text = "Active Trade Deals", HorizontalAlignment = HorizontalAlignment.Center };
+        var dealsTitle = new Label { Text = "Active 20-Turn Agreements", HorizontalAlignment = HorizontalAlignment.Center };
         dealsTitle.AddThemeFontSizeOverride("font_size", 14);
         dealsTitle.AddThemeColorOverride("font_color", new Color(0.3f, 0.2f, 0.1f));
         resVBox.AddChild(dealsTitle);
-        var noDeals = new Label { Text = "No active trade agreements.", HorizontalAlignment = HorizontalAlignment.Center };
-        noDeals.AddThemeFontSizeOverride("font_size", 12);
-        noDeals.AddThemeColorOverride("font_color", new Color(0.5f, 0.45f, 0.35f));
-        resVBox.AddChild(noDeals);
+
+        var activeDeals = _sim.Diplomacy?.ActiveDeals ?? new List<CivGame.Core.Diplomacy.TradeDeal>();
+        if (activeDeals.Count == 0)
+        {
+            var noDeals = new Label { Text = "No active trade agreements.", HorizontalAlignment = HorizontalAlignment.Center };
+            noDeals.AddThemeFontSizeOverride("font_size", 12);
+            noDeals.AddThemeColorOverride("font_color", new Color(0.5f, 0.45f, 0.35f));
+            resVBox.AddChild(noDeals);
+        }
+        else
+        {
+            foreach (var deal in activeDeals)
+            {
+                var dealCard = new PanelContainer();
+                var cardStyle = new StyleBoxFlat
+                {
+                    BgColor = new Color(0.97f, 0.94f, 0.88f),
+                    BorderWidthLeft = 2, BorderWidthTop = 1, BorderWidthRight = 1, BorderWidthBottom = 1,
+                    BorderColor = new Color(0.6f, 0.45f, 0.25f),
+                    CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+                    CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4,
+                    ContentMarginLeft = 6, ContentMarginRight = 6, ContentMarginTop = 4, ContentMarginBottom = 4
+                };
+                dealCard.AddThemeStyleboxOverride("panel", cardStyle);
+
+                var cardVBox = new VBoxContainer();
+                cardVBox.AddThemeConstantOverride("separation", 2);
+
+                var otherFaction = deal.FactionA == Faction.Player ? deal.FactionB : deal.FactionA;
+                string partnerName = _sim.GetCivilization(otherFaction).Name;
+
+                var headHBox = new HBoxContainer();
+                var partnerLbl = new Label { Text = $"🤝 With {partnerName}:", SizeFlagsHorizontal = SizeFlags.ExpandFill };
+                partnerLbl.AddThemeFontSizeOverride("font_size", 12);
+                partnerLbl.AddThemeColorOverride("font_color", new Color(0.2f, 0.15f, 0.05f));
+                var turnsLbl = new Label { Text = $"⏳ {deal.TurnsRemaining} turns" };
+                turnsLbl.AddThemeFontSizeOverride("font_size", 11);
+                turnsLbl.AddThemeColorOverride("font_color", new Color(0.5f, 0.35f, 0.1f));
+                headHBox.AddChild(partnerLbl);
+                headHBox.AddChild(turnsLbl);
+                cardVBox.AddChild(headHBox);
+
+                var pGives = new List<string>();
+                var aGives = new List<string>();
+                if (deal.FactionA == Faction.Player)
+                {
+                    if (deal.GoldPerTurnA > 0) pGives.Add($"{deal.GoldPerTurnA} GPT");
+                    pGives.AddRange(deal.ResourcesA.Select(r => ResourceRegistry.Get(r)?.Name ?? r));
+                    if (deal.GoldPerTurnB > 0) aGives.Add($"{deal.GoldPerTurnB} GPT");
+                    aGives.AddRange(deal.ResourcesB.Select(r => ResourceRegistry.Get(r)?.Name ?? r));
+                }
+                else
+                {
+                    if (deal.GoldPerTurnB > 0) pGives.Add($"{deal.GoldPerTurnB} GPT");
+                    pGives.AddRange(deal.ResourcesB.Select(r => ResourceRegistry.Get(r)?.Name ?? r));
+                    if (deal.GoldPerTurnA > 0) aGives.Add($"{deal.GoldPerTurnA} GPT");
+                    aGives.AddRange(deal.ResourcesA.Select(r => ResourceRegistry.Get(r)?.Name ?? r));
+                }
+                if (deal.PeaceTreaty) { pGives.Add("Peace"); aGives.Add("Peace"); }
+                if (deal.RightOfPassage) { pGives.Add("RoP"); aGives.Add("RoP"); }
+
+                string summary = $"Export: {(pGives.Count > 0 ? string.Join(", ", pGives) : "None")}\nImport: {(aGives.Count > 0 ? string.Join(", ", aGives) : "None")}";
+                var summaryLbl = new Label { Text = summary };
+                summaryLbl.AddThemeFontSizeOverride("font_size", 10);
+                summaryLbl.AddThemeColorOverride("font_color", new Color(0.35f, 0.3f, 0.25f));
+                cardVBox.AddChild(summaryLbl);
+
+                var cancelBtn = new Button { Text = "Cancel Agreement", Flat = true, CustomMinimumSize = new Vector2(0, 20) };
+                cancelBtn.AddThemeFontSizeOverride("font_size", 10);
+                cancelBtn.AddThemeColorOverride("font_color", new Color(0.7f, 0.2f, 0.2f));
+                var capturedDeal = deal;
+                cancelBtn.Pressed += () =>
+                {
+                    _sim.Diplomacy.CancelDeal(capturedDeal);
+                    dealCard.QueueFree();
+                };
+                cardVBox.AddChild(cancelBtn);
+
+                dealCard.AddChild(cardVBox);
+                resVBox.AddChild(dealCard);
+            }
+        }
 
         resourcesPanel.AddChild(resVBox);
         contentHBox.AddChild(resourcesPanel);

@@ -208,6 +208,12 @@ public class Unit
     public bool DetectsStealth { get; private set; }
     public bool HasHiddenNationality { get; private set; }
 
+    // Stealth tracking (Submarines / Stealth Aircraft)
+    private readonly HashSet<Faction> _revealedToFactions = new();
+    public void RevealTo(Faction faction) => _revealedToFactions.Add(faction);
+    public void Submerge() => _revealedToFactions.Clear();
+    public bool IsTemporarilyRevealedTo(Faction faction) => _revealedToFactions.Contains(faction);
+
     // Transport & Cargo tracking
     public List<string> LoadedUnitIds { get; } = new();
     public string? TransportUnitId { get; set; }
@@ -389,6 +395,8 @@ public class Unit
 
     public void ResetMovement()
     {
+        Submerge();
+
         if (IsWorkerBuilding())
         {
             RemainingMovement = 0.0f; // Keep movement locked to 0 while building

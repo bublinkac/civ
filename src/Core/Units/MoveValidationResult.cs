@@ -7,7 +7,8 @@ public enum MoveValidationFailureReason
     TargetNotAdjacent,
     NoMovementRemaining,
     TargetTileMissing,
-    TargetTileImpassable
+    TargetTileImpassable,
+    TargetTileOccupiedByForeignUnit
 }
 
 public readonly struct MoveValidationResult
@@ -35,6 +36,7 @@ public readonly struct MoveValidationResult
             MoveValidationFailureReason.NoMovementRemaining => "Unit has no movement points remaining.",
             MoveValidationFailureReason.TargetTileMissing => "Target tile does not exist.",
             MoveValidationFailureReason.TargetTileImpassable => "Target tile is impassable for this unit.",
+            MoveValidationFailureReason.TargetTileOccupiedByForeignUnit => "Target tile is occupied by a peaceful foreign unit.",
             _ => "Move is invalid."
         };
     }

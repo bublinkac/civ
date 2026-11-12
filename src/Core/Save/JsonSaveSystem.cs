@@ -10,15 +10,21 @@ public class JsonSaveSystem : ISaveSystem
 {
     private string GetSavePath(string slotName)
     {
-        try
+        if (EngineContext.IsGodotRuntime)
         {
-            return Godot.ProjectSettings.GlobalizePath($"user://{slotName}.json");
+            try
+            {
+                return Godot.ProjectSettings.GlobalizePath($"user://{slotName}.json");
+            }
+            catch
+            {
+                // Fallback if globalize fails inside Godot
+            }
         }
-        catch
-        {
-            // Fallback for tests/environments without Godot context
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"{slotName}.json");
-        }
+
+        string savesDir = Path.Combine(Directory.GetCurrentDirectory(), "saves");
+        Directory.CreateDirectory(savesDir);
+        return Path.Combine(savesDir, $"{slotName}.json");
     }
 
     public void Save(string slotName, GameSimulation sim)

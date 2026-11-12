@@ -64,11 +64,11 @@ public static class TerrainRegistry
 
         if (overridesApplied > 0)
         {
-            GD.Print($"[TerrainRegistry] Loaded {definitions.Count} terrains with {overridesApplied} JSON overrides from {TerrainStatsJsonPath}.");
+            Console.WriteLine($"[TerrainRegistry] Loaded {definitions.Count} terrains with {overridesApplied} JSON overrides from {TerrainStatsJsonPath}.");
         }
         else
         {
-            GD.Print($"[TerrainRegistry] Loaded {definitions.Count} terrains from fallback defaults (no JSON overrides).");
+            Console.WriteLine($"[TerrainRegistry] Loaded {definitions.Count} terrains from fallback defaults (no JSON overrides).");
         }
 
         foreach (var def in definitions.Values)
@@ -98,13 +98,33 @@ public static class TerrainRegistry
         };
     }
 
+    private static string ResolveStatsPath(string resPath)
+    {
+        if (EngineContext.IsGodotRuntime)
+        {
+            try
+            {
+                return ProjectSettings.GlobalizePath(resPath);
+            }
+            catch
+            {
+                // Fallback if globalize fails inside Godot
+            }
+        }
+
+        string relative = resPath.Replace("res://", "");
+        string candidate = Path.Combine(Directory.GetCurrentDirectory(), relative);
+        if (File.Exists(candidate)) return candidate;
+        return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, relative);
+    }
+
     private static int ApplyJsonOverrides(Dictionary<string, TerrainDefinition> definitions)
     {
         int overridesApplied = 0;
 
         try
         {
-            string jsonPath = ProjectSettings.GlobalizePath(TerrainStatsJsonPath);
+            string jsonPath = ResolveStatsPath(TerrainStatsJsonPath);
             if (!File.Exists(jsonPath))
             {
                 return 0;
@@ -138,7 +158,7 @@ public static class TerrainRegistry
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[TerrainRegistry] Failed to load terrain_stats.json overrides: {ex.Message}");
+            Console.Error.WriteLine($"[TerrainRegistry] Failed to load terrain_stats.json overrides: {ex.Message}");
             return 0;
         }
 

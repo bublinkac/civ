@@ -77,8 +77,8 @@ public partial class TargetingReticleRenderer : Node2D
 
                 _validTargets.Add((tx, ty));
 
-                // Check hostile targets (units or cities)
-                bool hasHostileUnit = sim.Units.Any(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(unit, u));
+                // Check hostile targets (units or cities), excluding undetected stealth units
+                bool hasHostileUnit = sim.Units.Any(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(unit, u) && (!u.IsStealth || sim.IsStealthUnitDetected(u, unit.Faction)));
                 bool hasHostileCity = sim.Cities.Any(c => c.X == tx && c.Y == ty && c.Faction != unit.Faction && sim.IsHostileToFaction(unit.Faction, c.Faction));
 
                 if (hasHostileUnit || hasHostileCity)

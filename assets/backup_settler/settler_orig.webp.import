@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cfhwhkuukuns3"
-path="res://.godot/imported/settler_orig.webp-6507bd4459a7fe3b5f2ed75ca2802b93.ctex"
+path="res://.godot/imported/settler_orig.webp-bea04b117a3ac7a7a1164b60fd0744fa.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/settler_orig.webp"
-dest_files=["res://.godot/imported/settler_orig.webp-6507bd4459a7fe3b5f2ed75ca2802b93.ctex"]
+source_file="res://assets/backup_settler/settler_orig.webp"
+dest_files=["res://.godot/imported/settler_orig.webp-bea04b117a3ac7a7a1164b60fd0744fa.ctex"]
 
 [params]
 

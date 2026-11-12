@@ -39,6 +39,22 @@ public static class VolcanoSystem
     {
         Console.WriteLine($"🔥 [VOLCANO ERUPTION] The mighty volcano at ({vx}, {vy}) has ERUPTED! Fiery magma is pouring down!");
 
+        sim.TurnEvents.AddEvent(new TurnEvent
+        {
+            Turn = sim.TurnNumber,
+            Faction = Faction.Player,
+            Category = TurnEventCategory.Disaster,
+            Advisor = AdvisorType.Domestic,
+            Severity = TurnEventSeverity.Critical,
+            Icon = "🌋",
+            Title = "Erupcia sopky!",
+            Message = $"Mocná sopka na pozícii ({vx}, {vy}) vybuchla! Žeravá láva zaliala okolité polia a poškodila infraštruktúru.",
+            TileX = vx,
+            TileY = vy,
+            ActionLabel = "Zobraziť sopku",
+            ActionType = TurnEventActionType.ZoomToTile
+        });
+
         // 1. Destroy any units directly on the volcano
         var unitsOnVolcano = sim.Units.Where(u => u.X == vx && u.Y == vy).ToList();
         foreach (var unit in unitsOnVolcano)

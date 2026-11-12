@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CivGame.Core.Pathfinding;
+using CivGame.Core.Diplomacy;
 
 namespace CivGame.Core.AI;
 
@@ -163,6 +164,81 @@ public static class AiRivalBrain
             else
             {
                 ExecuteMilitaryTask(sim, unit, leader, aiCities);
+            }
+        }
+
+        // 3. Proactive AI Diplomatic Initiatives
+        EvaluateProactiveDiplomacy(sim, faction);
+    }
+
+    private static void EvaluateProactiveDiplomacy(GameSimulation sim, Faction aiFaction)
+    {
+        if (!aiFaction.IsAi() || sim.Diplomacy == null) return;
+
+        // 1. War condition: Peace Proposal
+        if (sim.IsAtWarWithAi)
+        {
+            int aiCities = sim.Cities.Count(c => c.Faction == aiFaction);
+            int playerCities = sim.Cities.Count(c => c.Faction == Faction.Player);
+            int aiUnits = sim.Units.Count(u => u.Faction == aiFaction && u.AttackStrength > 0);
+            int playerUnits = sim.Units.Count(u => u.Faction == Faction.Player && u.AttackStrength > 0);
+
+            int warDuration = sim.WarStartTurn >= 0 ? sim.TurnNumber - sim.WarStartTurn : 0;
+
+            // If AI is losing (fewer cities, or severely outnumbered, or has fought >= 5 turns)
+            bool isLosing = (aiCities < playerCities && aiUnits <= 2) || (aiUnits < playerUnits / 2);
+            if (isLosing && warDuration >= 5)
+            {
+                var deal = new TradeDeal
+                {
+                    FactionA = aiFaction,
+                    FactionB = Faction.Player,
+                    PeaceTreaty = true,
+                    TurnsRemaining = 20
+                };
+                int aiTreasury = sim.GetTreasury(aiFaction);
+                if (aiTreasury >= 50)
+                {
+                    deal.LumpSumGoldA = Math.Min(100, aiTreasury / 2);
+                }
+
+                string leaderName = sim.GetCivilization(aiFaction).LeaderName;
+                string msg = $"{leaderName} sends an emissary bearing white flags:\n\"Let there be peace between our nations! We offer a peace treaty to halt this destructive conflict.\"";
+                sim.Diplomacy.TriggerAiProposal(deal, msg);
+                return;
+            }
+        }
+        else
+        {
+            // 2. Peace condition: Tech or Resource Proposal (Civ3 scholarly barter)
+            if (Random.Shared.NextDouble() < 0.05 && sim.Diplomacy.HasEmbassy(aiFaction, Faction.Player))
+            {
+                var aiTechs = sim.GetResearchedTechs(aiFaction);
+                var playerTechs = sim.GetResearchedTechs(Faction.Player);
+
+                var aiCanOffer = aiTechs.Where(t => !playerTechs.Contains(t)).ToList();
+                var playerCanOffer = playerTechs.Where(t => !aiTechs.Contains(t)).ToList();
+
+                if (aiCanOffer.Count > 0 && playerCanOffer.Count > 0)
+                {
+                    var deal = new TradeDeal
+                    {
+                        FactionA = aiFaction,
+                        FactionB = Faction.Player,
+                        TurnsRemaining = 20
+                    };
+                    string techFromAi = aiCanOffer[Random.Shared.Next(aiCanOffer.Count)];
+                    string techFromPlayer = playerCanOffer[Random.Shared.Next(playerCanOffer.Count)];
+                    deal.TechsA.Add(techFromAi);
+                    deal.TechsB.Add(techFromPlayer);
+
+                    var techA = sim.Research.AllTechnologies.Find(t => t.Id == techFromAi);
+                    var techB = sim.Research.AllTechnologies.Find(t => t.Id == techFromPlayer);
+
+                    string leaderName = sim.GetCivilization(aiFaction).LeaderName;
+                    string msg = $"{leaderName} proposes a scholarly pact:\n\"We propose to share our knowledge of {techA?.Name ?? techFromAi} in exchange for your secrets of {techB?.Name ?? techFromPlayer}.\"";
+                    sim.Diplomacy.TriggerAiProposal(deal, msg);
+                }
             }
         }
     }
@@ -1131,7 +1207,9 @@ public static class AiRivalBrain
                 int ty = warship.Y + dy;
                 if (!sim.Map.IsInBounds(tx, ty)) continue;
 
-                var hostile = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(warship, u) && u.Domain == UnitDomain.Sea);
+                var hostile = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && 
+                    sim.IsHostile(warship, u) && u.Domain == UnitDomain.Sea && 
+                    (!u.IsStealth || sim.IsStealthUnitDetected(u, warship.Faction)));
                 if (hostile != null)
                 {
                     Console.WriteLine($"[Naval AI] {warship.Type} engages enemy {hostile.Type} at ({tx}, {ty})!");
@@ -1154,7 +1232,8 @@ public static class AiRivalBrain
                     if (!sim.Map.IsInBounds(tx, ty)) continue;
 
                     var enemyCity = sim.Cities.Find(c => c.X == tx && c.Y == ty && c.Faction != warship.Faction && (c.Faction.IsBarbarian() || sim.IsAtWar(warship.Faction, c.Faction)));
-                    var enemyUnit = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && sim.IsHostile(warship, u));
+                    var enemyUnit = sim.Units.Find(u => u.X == tx && u.Y == ty && u.TransportUnitId == null && 
+                        sim.IsHostile(warship, u) && (!u.IsStealth || sim.IsStealthUnitDetected(u, warship.Faction)));
                     if (enemyCity != null || enemyUnit != null)
                     {
                         Console.WriteLine($"[Naval AI] {warship.Type} conducts naval bombardment on ({tx}, {ty})!");
@@ -1187,7 +1266,8 @@ public static class AiRivalBrain
         }
 
         // 4. Hunt enemy naval vessels or patrol towards enemy coastal waters
-        var enemyShip = sim.Units.FirstOrDefault(u => u.Domain == UnitDomain.Sea && sim.IsHostile(warship, u));
+        var enemyShip = sim.Units.FirstOrDefault(u => u.Domain == UnitDomain.Sea && sim.IsHostile(warship, u) && 
+            (!u.IsStealth || sim.IsStealthUnitDetected(u, warship.Faction)));
         if (enemyShip != null)
         {
             var path = sim.FindPath(warship, warship.X, warship.Y, enemyShip.X, enemyShip.Y, ignoreUnits: true);

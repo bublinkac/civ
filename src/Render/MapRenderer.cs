@@ -35,6 +35,9 @@ public partial class MapRenderer : TileMapLayer
     private GovernmentPanel? _governmentPanel;
     private CityCaptureDialog? _cityCaptureDialog;
     private HotseatTransitionModal? _hotseatModal;
+    private TurnNotificationsModal? _turnNotificationsModal;
+    private SpectatorController? _spectatorController;
+    private SpectatorOverlay? _spectatorOverlay;
 
     // Interactive targeting state (Bombard / Air Strikes)
     private bool _isTargetingMode;
@@ -46,7 +49,8 @@ public partial class MapRenderer : TileMapLayer
                                        GodotObject.IsInstanceValid(_advisorScreen) ||
                                        GodotObject.IsInstanceValid(_governmentPanel) ||
                                        GodotObject.IsInstanceValid(_cityCaptureDialog) ||
-                                       GodotObject.IsInstanceValid(_hotseatModal);
+                                       GodotObject.IsInstanceValid(_hotseatModal) ||
+                                       GodotObject.IsInstanceValid(_turnNotificationsModal);
 
 
     private MainMenu? _mainMenu;
@@ -92,6 +96,7 @@ public partial class MapRenderer : TileMapLayer
         _advisorsMenu.OnOpenWonders += OpenWonders;
         _advisorsMenu.OnOpenHistograph += OpenHistograph;
         _advisorsMenu.OnOpenDemographics += OpenDemographics;
+        _advisorsMenu.OnOpenCivilopedia += OpenCivilopedia;
         
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_advisorsMenu);
         else AddChild(_advisorsMenu);
@@ -152,6 +157,120 @@ public partial class MapRenderer : TileMapLayer
         esp.OnClosed += () => UpdateUiAfterAction();
         if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(esp);
         else AddChild(esp);
+    }
+
+    public void OpenCivilopedia()
+    {
+        if (_sim == null) return;
+        var pedia = new CivilopediaDialog(_sim);
+        pedia.OnClosed += () => UpdateUiAfterAction();
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(pedia);
+        else AddChild(pedia);
+    }
+
+    public void OpenTurnNotifications()
+    {
+        if (_sim == null) return;
+        if (GodotObject.IsInstanceValid(_turnNotificationsModal))
+        {
+            _turnNotificationsModal.Close();
+            _turnNotificationsModal = null;
+            return;
+        }
+
+        _turnNotificationsModal = new TurnNotificationsModal(_sim);
+        _turnNotificationsModal.OnClosed += () =>
+        {
+            _turnNotificationsModal = null;
+            UpdateUiAfterAction();
+        };
+        _turnNotificationsModal.OnActionRequested += HandleTurnEventAction;
+
+        if (GodotObject.IsInstanceValid(_hud)) _hud.AddChild(_turnNotificationsModal);
+        else AddChild(_turnNotificationsModal);
+
+        CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_advisor_open.wav");
+    }
+
+    private void HandleTurnEventAction(TurnEvent ev)
+    {
+        if (_sim == null) return;
+
+        switch (ev.ActionType)
+        {
+            case TurnEventActionType.ZoomToTile:
+                if (ev.TileX.HasValue && ev.TileY.HasValue && _camera != null)
+                {
+                    Vector2 targetPos = MapToLocal(new Vector2I(ev.TileX.Value, ev.TileY.Value));
+                    _camera.Position = targetPos;
+                    var city = _sim.Cities.Find(c => c.X == ev.TileX.Value && c.Y == ev.TileY.Value);
+                    if (city != null)
+                    {
+                        _selectedCityId = city.Id;
+                        _selectedUnitId = null;
+                    }
+                    else
+                    {
+                        var unit = _sim.Units.Find(u => u.X == ev.TileX.Value && u.Y == ev.TileY.Value && u.Faction == _sim.ActiveTurnFaction);
+                        if (unit != null)
+                        {
+                            _selectedUnitId = unit.Id;
+                            _selectedCityId = null;
+                        }
+                    }
+                    UpdateUiAfterAction();
+                }
+                break;
+
+            case TurnEventActionType.OpenCity:
+                City? targetCity = null;
+                if (!string.IsNullOrEmpty(ev.TargetCityId))
+                {
+                    targetCity = _sim.Cities.Find(c => c.Id == ev.TargetCityId);
+                }
+                if (targetCity == null && ev.TileX.HasValue && ev.TileY.HasValue)
+                {
+                    targetCity = _sim.Cities.Find(c => c.X == ev.TileX.Value && c.Y == ev.TileY.Value);
+                }
+                if (targetCity != null)
+                {
+                    if (_camera != null)
+                    {
+                        _camera.Position = MapToLocal(new Vector2I(targetCity.X, targetCity.Y));
+                    }
+                    OpenCityDetail(targetCity);
+                }
+                break;
+
+            case TurnEventActionType.OpenTechTree:
+                OpenTechTree();
+                break;
+
+            case TurnEventActionType.OpenAdvisor:
+                switch (ev.Advisor)
+                {
+                    case AdvisorType.Science:
+                        OpenTechTree();
+                        break;
+                    case AdvisorType.Military:
+                        OpenMilitaryAdvisor();
+                        break;
+                    case AdvisorType.Foreign:
+                        OpenForeignAdvisor();
+                        break;
+                    case AdvisorType.Cultural:
+                        OpenCulturalAdvisor();
+                        break;
+                    case AdvisorType.Trade:
+                        OpenTradeAdvisor();
+                        break;
+                    case AdvisorType.Domestic:
+                    default:
+                        OpenDomesticAdvisor();
+                        break;
+                }
+                break;
+        }
     }
 
     public override void _Ready()
@@ -410,6 +529,14 @@ public partial class MapRenderer : TileMapLayer
         }
 
         UpdateUiAfterAction();
+
+        // Check for critical events on new turn and open advisor briefing modal automatically
+        var turnEvents = _sim.TurnEvents.GetTurnEvents(_sim.TurnNumber, _sim.ActiveTurnFaction);
+        bool hasCritical = turnEvents.Any(e => e.Severity == TurnEventSeverity.Critical);
+        if (hasCritical && !CheckIsFullScreenUiOpen())
+        {
+            OpenTurnNotifications();
+        }
     }
 
     private void SetupPeerRenderers()
@@ -455,8 +582,18 @@ public partial class MapRenderer : TileMapLayer
         // Instantiate HUD
         _hud = new GameHud();
         _hud.OnActionTriggered += HandleHudAction;
+        _hud.OnTurnEventAction += HandleTurnEventAction;
         _hud.OnMinimapTileSelected += HandleMinimapTileSelected;
         GetParent().CallDeferred(Node.MethodName.AddChild, _hud);
+
+        // Instantiate Spectator Controller & Overlay
+        _spectatorController = new SpectatorController();
+        _spectatorController.Initialize(this, _sim);
+        GetParent().CallDeferred(Node.MethodName.AddChild, _spectatorController);
+
+        _spectatorOverlay = new SpectatorOverlay();
+        _spectatorOverlay.Initialize(_spectatorController, _sim);
+        GetParent().CallDeferred(Node.MethodName.AddChild, _spectatorOverlay);
 
         // City capture events
         _sim.OnCityCapturePrompt += HandleCityCapturePrompt;
@@ -465,6 +602,111 @@ public partial class MapRenderer : TileMapLayer
         _sim.PlayerGoldenAge.OnGoldenAgeStarted += (faction, reason) => _hud?.ShowNotification("GOLDEN AGE!", $"{faction} has entered a Golden Age!\n({reason})\n+1 Production and +1 Commerce for 20 turns.");
         _sim.PlayerGoldenAge.OnGoldenAgeEnded += (faction) => _hud?.ShowNotification("GOLDEN AGE ENDED", $"The Golden Age for {faction} has ended.");
         _sim.AiGoldenAge.OnGoldenAgeStarted += (faction, reason) => _hud?.ShowNotification("GOLDEN AGE!", $"{faction} has entered a Golden Age!\n({reason})");
+
+        // Strategic Resource Depletion & Discovery events
+        _sim.OnStrategicResourceDepleted += (res, x, y, city) =>
+        {
+            string loc = city != null ? city.Name : $"({x}, {y})";
+            _hud?.ShowNotification("RESOURCE EXHAUSTED!", $"Our source of {res.Name} near {loc} has run dry!");
+            RenderMap();
+        };
+
+        _sim.OnStrategicResourceDiscovered += (res, x, y, city) =>
+        {
+            string loc = city != null ? city.Name : $"({x}, {y})";
+            _hud?.ShowNotification("RESOURCE DISCOVERED!", $"Eureka! Prospectors discovered a rich deposit of {res.Name} near {loc}!");
+            RenderMap();
+        };
+
+        // Proactive AI Diplomatic Proposals
+        _sim.Diplomacy.OnAiProposedDeal += (deal, message) =>
+        {
+            if (_spectatorController != null && _spectatorController.IsActive)
+            {
+                if (deal.PeaceTreaty) _sim.Diplomacy.ExecuteDeal(deal);
+                return;
+            }
+
+            var dialog = new DiplomacyDialog(_sim, deal.FactionA, deal, message);
+            GetParent().CallDeferred(Node.MethodName.AddChild, dialog);
+            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+        };
+
+        // Trade deal expiration
+        _sim.Diplomacy.OnTradeDealExpired += (deal) =>
+        {
+            var otherCiv = _sim.GetCivilization(deal.FactionA == Faction.Player ? deal.FactionB : deal.FactionA);
+            _hud?.ShowNotification("TRADE PACT EXPIRED", $"Our 20-turn trade agreement with {otherCiv.Name} has concluded.");
+        };
+
+        // Naval Combat, Submarine Bump & ASW Sonar events (Phase 45)
+        _sim.OnSubmarineCollision += (mover, sub) =>
+        {
+            if (mover.Faction == Faction.Player || sub.Faction == Faction.Player)
+            {
+                var civSub = _sim.GetCivilization(sub.Faction);
+                var civMover = _sim.GetCivilization(mover.Faction);
+                if (mover.Faction == Faction.Player)
+                {
+                    _hud?.ShowNotification("KOLÍZIA S PONORKOU!", $"Naša loď {mover.Type} narazila na ponorenú ponorku ({civSub.Name}) na pozícii ({sub.X}, {sub.Y})! Plavidlo zastavilo.");
+                }
+                else
+                {
+                    _hud?.ShowNotification("PONORKA ODHALENÁ!", $"Cudzie plavidlo {mover.Type} ({civMover.Name}) narazilo na našu ponorku na pozícii ({sub.X}, {sub.Y})!");
+                }
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_error.wav");
+                UpdateUiAfterAction();
+            }
+        };
+
+        _sim.OnSubmarineAmbush += (sub, mover) =>
+        {
+            if (mover.Faction == Faction.Player || sub.Faction == Faction.Player)
+            {
+                var civSub = _sim.GetCivilization(sub.Faction);
+                var civMover = _sim.GetCivilization(mover.Faction);
+                if (mover.Faction == Faction.Player)
+                {
+                    _hud?.ShowNotification("PREPAD PONORKOU!", $"Naše plavidlo {mover.Type} vplávalo do pasce ponorenej nepriateľskej ponorky {sub.Type} ({civSub.Name}) na ({sub.X}, {sub.Y})!");
+                }
+                else
+                {
+                    _hud?.ShowNotification("PREPAD ZAČATÝ!", $"Naša ponorka {sub.Type} prepadla nepriateľské plavidlo {mover.Type} ({civMover.Name}) na ({sub.X}, {sub.Y})!");
+                }
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                UpdateUiAfterAction();
+            }
+        };
+
+        _sim.OnSubmarineWithdrawal += (sub, attacker, escapeCoord) =>
+        {
+            if (sub.Faction == Faction.Player || attacker.Faction == Faction.Player)
+            {
+                var civSub = _sim.GetCivilization(sub.Faction);
+                var civAttacker = _sim.GetCivilization(attacker.Faction);
+                if (sub.Faction == Faction.Player)
+                {
+                    _hud?.ShowNotification("TAKTIČKÝ ÚNIK!", $"Naša ponorka {sub.Type} vykonala núdzový ponor a unikla pred {attacker.Type} do bezpečia ({escapeCoord.X}, {escapeCoord.Y}) s 1 HP!");
+                }
+                else
+                {
+                    _hud?.ShowNotification("PONORKA UNIKLA!", $"Nepriateľská ponorka {sub.Type} ({civSub.Name}) unikla hlbinným ponorom pred zásahom našej lode {attacker.Type}!");
+                }
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                UpdateUiAfterAction();
+            }
+        };
+
+        _sim.OnSonarContactDetected += (sub, detectorFaction) =>
+        {
+            if (detectorFaction == Faction.Player)
+            {
+                var civSub = _sim.GetCivilization(sub.Faction);
+                _hud?.ShowNotification("SONAROVÝ KONTAKT!", $"ASW Sonar lokalizoval ponorenú nepriateľskú ponorku ({civSub.Name}) na pozícii ({sub.X}, {sub.Y})!");
+                CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                UpdateUiAfterAction();
+            }
+        };
 
         // Defer initial updates until both renderers are ready in the scene tree
         Callable.From(() =>
@@ -937,7 +1179,8 @@ public partial class MapRenderer : TileMapLayer
                                               GodotObject.IsInstanceValid(_advisorScreen) ||
                                               GodotObject.IsInstanceValid(_governmentPanel) ||
                                               GodotObject.IsInstanceValid(_cityCaptureDialog) ||
-                                              GodotObject.IsInstanceValid(_hotseatModal);
+                                              GodotObject.IsInstanceValid(_hotseatModal) ||
+                                              GodotObject.IsInstanceValid(_turnNotificationsModal);
 
     public override void _Process(double delta)
     {
@@ -1182,6 +1425,11 @@ public partial class MapRenderer : TileMapLayer
         {
             if (keyEvent.Keycode == Key.Space)
             {
+                if (_spectatorController != null && _spectatorController.IsActive)
+                {
+                    _spectatorController.TogglePause();
+                    return;
+                }
                 ExecuteEndTurn();
             }
             else if (keyEvent.Keycode == Key.B && !string.IsNullOrEmpty(_selectedUnitId))
@@ -1368,7 +1616,11 @@ public partial class MapRenderer : TileMapLayer
             else if (keyEvent.Keycode == Key.F7) { OpenWonders(); }
             else if (keyEvent.Keycode == Key.F8) { OpenGovernment(); }
             else if (keyEvent.Keycode == Key.F9) { OpenHistograph(); }
+            else if (keyEvent.Keycode == Key.F10) { ToggleSpectatorMode(); }
             else if (keyEvent.Keycode == Key.F11) { OpenDemographics(); }
+            else if (keyEvent.Keycode == Key.F12) { OpenCivilopedia(); }
+            else if (keyEvent.Keycode == Key.N) { OpenTurnNotifications(); }
+            else if (keyEvent.Keycode == Key.F && keyEvent.CtrlPressed && keyEvent.ShiftPressed) { FastForwardToTurn(_sim.TurnNumber + 50); }
         }
     }
 
@@ -1831,6 +2083,15 @@ public partial class MapRenderer : TileMapLayer
             case "open_espionage":
                 OpenEspionage();
                 break;
+            case "open_civilopedia":
+                OpenCivilopedia();
+                break;
+            case "open_turn_events":
+                OpenTurnNotifications();
+                break;
+            case "toggle_spectator":
+                ToggleSpectatorMode();
+                break;
         }
     }
 
@@ -1960,6 +2221,16 @@ public partial class MapRenderer : TileMapLayer
 
     private void HandleCityCapturePrompt(City city, Unit capturingUnit)
     {
+        if (_spectatorController != null && _spectatorController.IsActive)
+        {
+            bool shouldRaze = city.Population <= 1 && city.Buildings.Count <= 1 && !city.IsCapital;
+            var choice = shouldRaze ? CityCaptureChoice.Raze : CityCaptureChoice.Keep;
+            _sim?.ApplyCityCaptureChoice(city, capturingUnit, choice);
+            UpdateUiAfterAction();
+            GD.Print($"[Spectator Auto-Capture] City {city.Name} captured by {capturingUnit.Faction}. Choice: {choice}");
+            return;
+        }
+
         GD.Print($"[City Capture] Prompting player decision for {city.Name}...");
         var dialog = new CityCaptureDialog(_sim!, city, capturingUnit);
         dialog.OnChoiceMade += (choice) =>
@@ -1980,7 +2251,7 @@ public partial class MapRenderer : TileMapLayer
         GetParent().CallDeferred(Node.MethodName.AddChild, dialog);
     }
 
-    private void UpdateUiAfterAction()
+    public void UpdateUiAfterAction()
     {
         if (_sim == null || _unitRenderer == null || _fogRenderer == null) return;
         if (!string.IsNullOrEmpty(_selectedCityId) && !_sim.Cities.Any(c => c.Id == _selectedCityId))
@@ -2000,6 +2271,17 @@ public partial class MapRenderer : TileMapLayer
         Unit? selUnit = _sim.Units.Find(u => u.Id == _selectedUnitId);
         _highlightRenderer?.UpdateHighlight(_sim, selUnit);
         _hud?.Refresh(_sim, _selectedUnitId, _selectedCityId);
+    }
+
+    public void ToggleSpectatorMode()
+    {
+        _spectatorController?.ToggleSpectatorMode();
+    }
+
+    public void FastForwardToTurn(int targetTurn)
+    {
+        if (_sim == null || _sim.TurnNumber >= targetTurn) return;
+        _spectatorController?.FastForward(targetTurn - _sim.TurnNumber);
     }
 
     private void HandleMinimapTileSelected(int x, int y)

@@ -233,6 +233,21 @@ public class TechManager
             CurrentScienceProgress = 0;
 
             Console.WriteLine($"[Veda] Výskum technológie {completedTech.Name} bol úspešne dokončený!");
+
+            sim.TurnEvents.AddEvent(new TurnEvent
+            {
+                Turn = sim.TurnNumber,
+                Faction = Faction.Player,
+                Category = TurnEventCategory.Science,
+                Advisor = AdvisorType.Science,
+                Severity = TurnEventSeverity.Success,
+                Icon = "🔬",
+                Title = $"Vedecký objav: {completedTech.Name}",
+                Message = $"Naši učenci úspešne dokončili výskum technológie {completedTech.Name}! " + (!string.IsNullOrEmpty(completedTech.Description) ? completedTech.Description : "Otvárajú sa nové možnosti pre celú ríšu."),
+                TargetTechId = completedTech.Id,
+                ActionLabel = "Zvoliť nový výskum",
+                ActionType = TurnEventActionType.OpenTechTree
+            });
         }
     }
 

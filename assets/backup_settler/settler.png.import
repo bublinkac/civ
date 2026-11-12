@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d4i53yxd70227"
-path="res://.godot/imported/settler.png-783aba7e92f3e998806a0435f3a96e8d.ctex"
+path="res://.godot/imported/settler.png-f3f5ae22028b8d342c5872d202cb92a6.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/settler.png"
-dest_files=["res://.godot/imported/settler.png-783aba7e92f3e998806a0435f3a96e8d.ctex"]
+source_file="res://assets/backup_settler/settler.png"
+dest_files=["res://.godot/imported/settler.png-f3f5ae22028b8d342c5872d202cb92a6.ctex"]
 
 [params]
 

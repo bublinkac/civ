@@ -19,6 +19,7 @@ public partial class AdvisorsMenu : PanelContainer
     public event Action? OnOpenWonders;
     public event Action? OnOpenHistograph;
     public event Action? OnOpenDemographics;
+    public event Action? OnOpenCivilopedia;
     
     public AdvisorsMenu()
     {
@@ -123,6 +124,12 @@ public partial class AdvisorsMenu : PanelContainer
             new Color(0.30f, 0.40f, 0.30f));
         demoBtn.Pressed += () => { OnOpenDemographics?.Invoke(); QueueFree(); };
         vbox.AddChild(demoBtn);
+
+        // F12 — Civilopedia
+        var pediaBtn = CreateAdvisorButton("F12  CIVILOPEDIA", "Game encyclopedia & tactical guide",
+            new Color(0.18f, 0.38f, 0.28f));
+        pediaBtn.Pressed += () => { OnOpenCivilopedia?.Invoke(); QueueFree(); };
+        vbox.AddChild(pediaBtn);
 
         vbox.AddChild(new Control { SizeFlagsVertical = Control.SizeFlags.ExpandFill });
 

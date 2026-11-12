@@ -11,6 +11,7 @@ public partial class GameHud : CanvasLayer
     // Actions delegate
     public event Action<string>? OnActionTriggered;
     public event Action<int, int>? OnMinimapTileSelected;
+    public event Action<TurnEvent>? OnTurnEventAction;
 
     private GameSimulation? _sim;
 
@@ -21,11 +22,12 @@ public partial class GameHud : CanvasLayer
     private Label? _detailsLabel;
     private Button? _endTurnButton;
     private TextureRect? _civIconRect;
+    private TurnEventTicker? _turnTicker;
+    private Button? _eventsButton;
 
     // Top buttons and modals
     private PanelContainer? _topBar;
     private Button? _govButton;
-    private PanelContainer? _civilopediaModal;
     private PanelContainer? _gameMenuModal;
 
     // Game End overlay and labels
@@ -76,12 +78,16 @@ public partial class GameHud : CanvasLayer
         menuBtn.Pressed += () => ToggleModal(_gameMenuModal);
         hbox.AddChild(menuBtn);
 
+        _eventsButton = CreateStyledButton("📰 Správy [N]", new Color(0.20f, 0.28f, 0.38f));
+        _eventsButton.Pressed += () => OnActionTriggered?.Invoke("open_turn_events");
+        hbox.AddChild(_eventsButton);
+
         var advisorsBtn = CreateStyledButton("👥 Advisors", new Color(0.15f, 0.35f, 0.35f));
         advisorsBtn.Pressed += () => OnActionTriggered?.Invoke("open_advisors");
         hbox.AddChild(advisorsBtn);
 
         var civilopediaBtn = CreateStyledButton("📚 Civilopedia", new Color(0.15f, 0.3f, 0.15f));
-        civilopediaBtn.Pressed += () => ToggleModal(_civilopediaModal);
+        civilopediaBtn.Pressed += () => OnActionTriggered?.Invoke("open_civilopedia");
         hbox.AddChild(civilopediaBtn);
 
         var researchBtn = CreateStyledButton("🔬 Tech Tree", new Color(0.15f, 0.15f, 0.35f));
@@ -107,6 +113,10 @@ public partial class GameHud : CanvasLayer
         var espBtn = CreateStyledButton("🕵️ Espionage", new Color(0.15f, 0.15f, 0.25f));
         espBtn.Pressed += () => OnActionTriggered?.Invoke("open_espionage");
         hbox.AddChild(espBtn);
+
+        var specBtn = CreateStyledButton("👁️ Spectator", new Color(0.28f, 0.18f, 0.38f));
+        specBtn.Pressed += () => OnActionTriggered?.Invoke("toggle_spectator");
+        hbox.AddChild(specBtn);
 
         _topBar.AddChild(hbox);
         AddChild(_topBar);
@@ -222,95 +232,7 @@ public partial class GameHud : CanvasLayer
 
     private void SetupModals()
     {
-        // 1. Civilopedia modal
-        _civilopediaModal = new PanelContainer();
-        _civilopediaModal.CustomMinimumSize = new Vector2(650, 420);
-        _civilopediaModal.AnchorLeft = 0.5f;
-        _civilopediaModal.AnchorRight = 0.5f;
-        _civilopediaModal.AnchorTop = 0.5f;
-        _civilopediaModal.AnchorBottom = 0.5f;
-        _civilopediaModal.GrowHorizontal = Control.GrowDirection.Both;
-        _civilopediaModal.GrowVertical = Control.GrowDirection.Both;
-        _civilopediaModal.AddThemeStyleboxOverride("panel", CreatePanelStyle(new Color(0.08f, 0.08f, 0.12f, 0.98f), new Color(0.95f, 0.72f, 0.12f, 0.95f), 3, 8));
-        _civilopediaModal.Visible = false;
-
-        var marginPedia = new MarginContainer();
-        marginPedia.AddThemeConstantOverride("margin_left", 16);
-        marginPedia.AddThemeConstantOverride("margin_right", 16);
-        marginPedia.AddThemeConstantOverride("margin_top", 16);
-        marginPedia.AddThemeConstantOverride("margin_bottom", 16);
-
-        var vboxPedia = new VBoxContainer();
-        vboxPedia.AddThemeConstantOverride("separation", 12);
-
-        var titleLabel = new Label();
-        titleLabel.Text = "📚 CIVILOPEDIA - Strategy Guide";
-        titleLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        titleLabel.AddThemeFontSizeOverride("font_size", 20);
-        titleLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.72f, 0.12f));
-        vboxPedia.AddChild(titleLabel);
-
-        var tabContainer = new TabContainer();
-        tabContainer.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-
-        // Tab: Terrain Yields
-        var terrainLabel = new Label();
-        terrainLabel.Text = "• GRASSLAND: Yields F:2 P:0 C:1. Excellent for food collection.\n" +
-                           "• PLAINS: Yields F:1 P:1 C:1. Balanced starting terrain.\n" +
-                           "• MOUNTAIN: Yields F:0 P:1 C:0. Impassable for movement, but worked for Production.\n" +
-                           "• DESERT: Yields F:0 P:1 C:0. Dry terrain with minimal yields.\n" +
-                           "• OCEAN: Yields F:1 P:0 C:2. Impassable for land units, contains high commerce.";
-        terrainLabel.AddThemeFontSizeOverride("font_size", 14);
-        terrainLabel.Name = "Terrain & Yields";
-        tabContainer.AddChild(terrainLabel);
-
-        // Tab: Improvements
-        var improvementsLabel = new Label();
-        improvementsLabel.Text = "Workers can build tile improvements to permanently boost tile yields:\n" +
-                                 "• FARM [F]: Adds +1 Food. Buildable on Grassland / Plains.\n" +
-                                 "• MINE [M]: Adds +1 Production. Buildable on Desert / Mountains.\n" +
-                                 "• PLANTATION [L]: Adds +1 Commerce. Buildable on Grassland / Plains.\n" +
-                                 "• ROAD [R]: Reduces movement cost to 1/3 MP, adds +1 Commerce.\n" +
-                                 "• RAILROAD [R]: Unlocks with Steam Power. Reduces movement to 0 MP (unlimited), adds +1 Food to Farms, +1 Production to Mines.\n\n" +
-                                 "Note: Improvements take multiple turns to build (Farm: 3, Mine: 4, Plantation: 3, Road: 2, Railroad: 3).";
-        improvementsLabel.AddThemeFontSizeOverride("font_size", 14);
-        improvementsLabel.Name = "Improvements";
-        tabContainer.AddChild(improvementsLabel);
-
-        // Tab: Tech Tree
-        var techLabel = new Label();
-        techLabel.Text = "Commerce generated by cities is converted 1:1 into Science. Cycle research using T.\n" +
-                        "• POTTERY (15 Sci): Unlocks Granary building.\n" +
-                        "• CEREMONIAL BURIAL (15 Sci): Unlocks Monument building.\n" +
-                        "• BRONZE WORKING (25 Sci): Unlocks Archer combat unit.\n\n" +
-                        "MESSAGES: Granary preserves 50% food on city growth. Monument claims a massive 5x5 border territory!";
-        techLabel.AddThemeFontSizeOverride("font_size", 14);
-        techLabel.Name = "Technologies";
-        tabContainer.AddChild(techLabel);
-
-        // Tab: Diplomacy
-        var diplomacyLabel = new Label();
-        diplomacyLabel.Text = "• FACTIONS: Player, Barbarians, and AI Rival.\n" +
-                               "• PEACE & WAR: Factions start at peace. Stacking on top of peaceful units is blocked.\n" +
-                               "• TERRITORY INTRUSION: Crossing into another nation's border immediately triggers WAR!\n" +
-                               "• COMBAT: Engagement calculates attack vs defense ratios. Units below 0 HP are destroyed.";
-        diplomacyLabel.AddThemeFontSizeOverride("font_size", 14);
-        diplomacyLabel.Name = "Diplomacy & Combat";
-        tabContainer.AddChild(diplomacyLabel);
-
-        vboxPedia.AddChild(tabContainer);
-
-        var closePediaBtn = CreateStyledButton("CLOSE GUIDE", new Color(0.6f, 0.2f, 0.2f));
-        closePediaBtn.Pressed += () => _civilopediaModal.Visible = false;
-        closePediaBtn.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
-        closePediaBtn.CustomMinimumSize = new Vector2(160, 36);
-        vboxPedia.AddChild(closePediaBtn);
-
-        marginPedia.AddChild(vboxPedia);
-        _civilopediaModal.AddChild(marginPedia);
-        AddChild(_civilopediaModal);
-
-        // 2. Game Menu modal
+        // Game Menu modal
         _gameMenuModal = new PanelContainer();
         _gameMenuModal.CustomMinimumSize = new Vector2(250, 400);
         _gameMenuModal.AnchorLeft = 0.5f;
@@ -574,18 +496,40 @@ public partial class GameHud : CanvasLayer
     {
         if (modal == null) return;
         modal.Visible = !modal.Visible;
-
-        // Bring to front
-        if (modal.Visible)
-        {
-            if (modal == _civilopediaModal && _gameMenuModal != null) _gameMenuModal.Visible = false;
-            if (modal == _gameMenuModal && _civilopediaModal != null) _civilopediaModal.Visible = false;
-        }
     }
 
     public void Refresh(GameSimulation sim, string? selectedUnitId, string? selectedCityId = null)
     {
         _sim = sim;
+
+        // Turn Event Ticker & News button update
+        if (_turnTicker == null)
+        {
+            _turnTicker = new TurnEventTicker(sim);
+            _turnTicker.OnOpenAllNotifications += () => OnActionTriggered?.Invoke("open_turn_events");
+            _turnTicker.OnExecuteEventAction += (ev) => OnTurnEventAction?.Invoke(ev);
+            AddChild(_turnTicker);
+        }
+        else
+        {
+            _turnTicker.RefreshEvents();
+        }
+
+        if (_eventsButton != null)
+        {
+            int unreadCount = sim.TurnEvents.GetUnreadEvents(sim.ActiveTurnFaction).Count;
+            if (unreadCount > 0)
+            {
+                _eventsButton.Text = $"📰 Správy ({unreadCount}) [N]";
+                _eventsButton.AddThemeColorOverride("font_color", new Color(0.96f, 0.85f, 0.30f));
+            }
+            else
+            {
+                int totalThisTurn = sim.TurnEvents.GetTurnEvents(sim.TurnNumber, sim.ActiveTurnFaction).Count;
+                _eventsButton.Text = totalThisTurn > 0 ? $"📰 Správy ({totalThisTurn}) [N]" : "📰 Správy [N]";
+                _eventsButton.RemoveThemeColorOverride("font_color");
+            }
+        }
 
         // Dynamically load active turn civilization icon
         if (_civIconRect != null)
@@ -684,7 +628,8 @@ public partial class GameHud : CanvasLayer
             Unit? unit = sim.Units.Find(u => u.Id == selectedUnitId);
             if (unit != null)
             {
-                string factionStr = unit.Faction == sim.ActiveTurnFaction ? "" : $" [{unit.Faction}]";
+                string factionStr = unit.Faction == sim.ActiveTurnFaction ? "" : 
+                    (unit.HasHiddenNationality && unit.Faction != Faction.Player ? " [Pirate / Unknown]" : $" [{unit.Faction}]");
                 string statusStr = "";
                 if (unit.IsSleeping) statusStr = " | Status: SLEEPING";
                 else if (unit.IsFortified) statusStr = " | Status: FORTIFIED (+25% Defense)";
@@ -705,7 +650,15 @@ public partial class GameHud : CanvasLayer
                 }
                 if (unit.IsStealth)
                 {
-                    cargoStr += " | [STEALTH]";
+                    cargoStr += " | 🌊 [STEALTH]";
+                }
+                if (unit.DetectsStealth)
+                {
+                    cargoStr += " | 📡 [ASW SONAR]";
+                }
+                if (unit.HasHiddenNationality)
+                {
+                    cargoStr += " | 🏴‍☠️ [HIDDEN NATIONALITY]";
                 }
 
                 string details = $"[UNIT] {unit.Type.ToString().ToUpper()}{factionStr} ({unit.Domain})\n" +

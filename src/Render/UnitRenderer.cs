@@ -85,11 +85,11 @@ public partial class UnitRenderer : Node2D
             // Embarked units are carried inside transports and not rendered as separate ground units
             if (unit.IsLoadedInTransport) continue;
 
-            // Opposing stealth units (e.g. Submarines) are invisible unless detected by sonar/detectors
+            // Opposing stealth units (e.g. Submarines) are invisible unless detected by sonar/detectors/bump/proximity
             if (unit.IsStealth && unit.Faction != Faction.Player)
             {
-                bool detected = sim.Units.Any(u => u.Faction == Faction.Player && u.DetectsStealth && sim.Map.GetChebyshevDistance(u.X, u.Y, unit.X, unit.Y) <= 2);
-                if (!detected) continue;
+                if (!sim.IsStealthUnitDetected(unit, Faction.Player))
+                    continue;
             }
 
             var key = (unit.X, unit.Y);
@@ -197,7 +197,15 @@ public partial class UnitRenderer : Node2D
                 sprite.Scale = onCityTile ? new Vector2(0.75f, 0.75f) : new Vector2(1.0f, 1.0f);
 
                 // Apply faction color tint
-                sprite.SelfModulate = GetFactionModulateColor(unit.Faction);
+                if (unit.HasHiddenNationality && unit.Faction != Faction.Player)
+                {
+                    // Privateers fly the Jolly Roger (neutral dark grey / black sails)
+                    sprite.SelfModulate = new Color(0.35f, 0.35f, 0.35f);
+                }
+                else
+                {
+                    sprite.SelfModulate = GetFactionModulateColor(unit.Faction);
+                }
 
                 // Status Icon
                 if (!_statusIcons.TryGetValue(unit.Id, out var statusLabel))
@@ -218,7 +226,9 @@ public partial class UnitRenderer : Node2D
                 if (isTop)
                 {
                     statusLabel.Position = sprite.Position + new Vector2(4, -20);
-                    if (unit.IsSleeping) statusLabel.Text = "💤";
+                    if (unit.HasHiddenNationality && unit.Faction != Faction.Player) statusLabel.Text = "🏴‍☠️";
+                    else if (unit.IsStealth && unit.Faction != Faction.Player) statusLabel.Text = "📡";
+                    else if (unit.IsSleeping) statusLabel.Text = "💤";
                     else if (unit.IsFortified) statusLabel.Text = "🛡️";
                     else if (unit.IsSentry) statusLabel.Text = "👁️";
                     else if (unit.IsAutomated) statusLabel.Text = "⚙️";

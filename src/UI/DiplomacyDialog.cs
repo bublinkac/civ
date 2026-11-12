@@ -22,11 +22,11 @@ public partial class DiplomacyDialog : CanvasLayer
     private ItemList _aiOfferList = null!;
     private Label _advisorMsg = null!;
 
-    public DiplomacyDialog(GameSimulation sim, Faction otherFaction)
+    public DiplomacyDialog(GameSimulation sim, Faction otherFaction, TradeDeal? initialDeal = null, string? initialMessage = null)
     {
         _sim = sim;
         _otherFaction = otherFaction;
-        _currentDeal = new TradeDeal { FactionA = Faction.Player, FactionB = otherFaction };
+        _currentDeal = initialDeal ?? new TradeDeal { FactionA = Faction.Player, FactionB = otherFaction };
         
         Layer = 110;
 
@@ -68,7 +68,7 @@ public partial class DiplomacyDialog : CanvasLayer
         title.AddThemeFontSizeOverride("font_size", 22);
         vbox.AddChild(title);
 
-        _advisorMsg = new Label { Text = "What brings you to our court?", HorizontalAlignment = HorizontalAlignment.Center };
+        _advisorMsg = new Label { Text = initialMessage ?? "What brings you to our court?", HorizontalAlignment = HorizontalAlignment.Center };
         _advisorMsg.AddThemeColorOverride("font_color", new Color(0.4f, 0.3f, 0.1f));
         vbox.AddChild(_advisorMsg);
 
@@ -156,13 +156,35 @@ public partial class DiplomacyDialog : CanvasLayer
     {
         _playerOfferList.Clear();
         if (_currentDeal.LumpSumGoldA > 0) _playerOfferList.AddItem($"{_currentDeal.LumpSumGoldA} Gold");
+        if (_currentDeal.GoldPerTurnA > 0) _playerOfferList.AddItem($"{_currentDeal.GoldPerTurnA} Gold / Turn (20 turns)");
         if (_currentDeal.PeaceTreaty) _playerOfferList.AddItem("Peace Treaty");
         if (_currentDeal.WorldMapA) _playerOfferList.AddItem("World Map");
+        foreach (var t in _currentDeal.TechsA)
+        {
+            var tech = _sim.Research.AllTechnologies.Find(x => x.Id == t);
+            _playerOfferList.AddItem($"Tech: {tech?.Name ?? t}");
+        }
+        foreach (var r in _currentDeal.ResourcesA)
+        {
+            var res = ResourceRegistry.Get(r);
+            _playerOfferList.AddItem($"Resource: {res?.Name ?? r}");
+        }
 
         _aiOfferList.Clear();
         if (_currentDeal.LumpSumGoldB > 0) _aiOfferList.AddItem($"{_currentDeal.LumpSumGoldB} Gold");
+        if (_currentDeal.GoldPerTurnB > 0) _aiOfferList.AddItem($"{_currentDeal.GoldPerTurnB} Gold / Turn (20 turns)");
         if (_currentDeal.PeaceTreaty) _aiOfferList.AddItem("Peace Treaty");
         if (_currentDeal.WorldMapB) _aiOfferList.AddItem("World Map");
+        foreach (var t in _currentDeal.TechsB)
+        {
+            var tech = _sim.Research.AllTechnologies.Find(x => x.Id == t);
+            _aiOfferList.AddItem($"Tech: {tech?.Name ?? t}");
+        }
+        foreach (var r in _currentDeal.ResourcesB)
+        {
+            var res = ResourceRegistry.Get(r);
+            _aiOfferList.AddItem($"Resource: {res?.Name ?? r}");
+        }
     }
 
     private void ProposeDeal()
