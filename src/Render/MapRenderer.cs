@@ -278,6 +278,8 @@ public partial class MapRenderer : TileMapLayer
         // 1. Enable Y-Sorting for correct rendering overlay order
         YSortEnabled = true;
 
+        CivGame.Audio.AudioManager.Instance?.PlayMenuMusic();
+
         // Show Main Menu first
         _mainMenu = new MainMenu();
         _mainMenu.OnStartGame += (setupOptions) =>
@@ -333,6 +335,9 @@ public partial class MapRenderer : TileMapLayer
 
         // 6. Setup Controllable Camera and focus on starting unit
         SetupCamera();
+
+        // 7. Start Era-specific background music
+        CivGame.Audio.AudioManager.Instance?.PlayEraMusic(_sim.GetResearch(_sim.ActiveTurnFaction).GetCurrentEra());
     }
 
     private void StartGame(GameSetupOptions setupOptions)
@@ -366,6 +371,9 @@ public partial class MapRenderer : TileMapLayer
 
         // 6. Setup Controllable Camera and focus on starting unit
         SetupCamera();
+
+        // 7. Start Era-specific background music
+        CivGame.Audio.AudioManager.Instance?.PlayEraMusic(_sim.GetResearch(_sim.ActiveTurnFaction).GetCurrentEra());
     }
 
     private void StartNetworkGame(GameSetupOptions setupOptions)
@@ -522,6 +530,7 @@ public partial class MapRenderer : TileMapLayer
         _sim.EndTurn();
         GD.Print($"[Turn Manager] Turn {_sim.TurnNumber} started.");
         CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/ui_turn_end.wav");
+        CivGame.Audio.AudioManager.Instance?.PlayEraMusic(_sim.GetResearch(_sim.ActiveTurnFaction).GetCurrentEra());
 
         if (!string.IsNullOrEmpty(_selectedUnitId) && !_sim.Units.Any(u => u.Id == _selectedUnitId))
         {
@@ -1394,6 +1403,10 @@ public partial class MapRenderer : TileMapLayer
                     MoveValidationResult validation = _sim.ValidateUnitMove(selectedUnit, targetCell.X, targetCell.Y);
                     if (validation.IsValid)
                     {
+                        UnitType movingType = selectedUnit.Type;
+                        bool wasCombat = _sim.Units.Any(u => u.X == targetCell.X && u.Y == targetCell.Y && _sim.IsAtWar(selectedUnit.Faction, u.Faction)) ||
+                                         _sim.Cities.Any(c => c.X == targetCell.X && c.Y == targetCell.Y && _sim.IsAtWar(selectedUnit.Faction, c.Faction));
+
                         bool moved = _sim.MoveUnit(selectedUnit, targetCell.X, targetCell.Y);
                         if (moved)
                         {
@@ -1403,7 +1416,10 @@ public partial class MapRenderer : TileMapLayer
                                 _selectedUnitId = null;
                                 selectedUnit = null;
                             }
-                            CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                            if (wasCombat)
+                                CivGame.Audio.AudioManager.Instance?.PlayUnitCombatSfx(movingType);
+                            else
+                                CivGame.Audio.AudioManager.Instance?.PlayUnitMoveSfx(movingType);
 
                             _unitRenderer.UpdateUnits(_sim, _selectedUnitId);
                             _fogRenderer.UpdateFog(_sim);
@@ -2184,7 +2200,7 @@ public partial class MapRenderer : TileMapLayer
                 if (success)
                 {
                     GD.Print($"[Bombard] {unit.Type} bombarded ({targetX}, {targetY})!");
-                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/combat_hit.wav");
+                    CivGame.Audio.AudioManager.Instance?.PlayUnitCombatSfx(unit.Type, isBombard: true);
                 }
                 break;
 
@@ -2193,7 +2209,7 @@ public partial class MapRenderer : TileMapLayer
                 if (success)
                 {
                     GD.Print($"[Air Strike] {unit.Type} struck ({targetX}, {targetY})!");
-                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/combat_hit.wav");
+                    CivGame.Audio.AudioManager.Instance?.PlayUnitCombatSfx(unit.Type);
                 }
                 break;
 
@@ -2210,7 +2226,7 @@ public partial class MapRenderer : TileMapLayer
                 if (success)
                 {
                     GD.Print($"[Air Rebase] {unit.Type} rebased to ({targetX}, {targetY})!");
-                    CivGame.Audio.AudioManager.Instance?.PlaySfx("res://assets/sounds/unit_move.wav");
+                    CivGame.Audio.AudioManager.Instance?.PlayUnitMoveSfx(unit.Type);
                 }
                 break;
         }

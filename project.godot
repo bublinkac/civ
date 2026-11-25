@@ -18,6 +18,10 @@ config/name="CivGame"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.6", "C#", "Forward Plus")
 
+[autoload]
+
+AudioManager="*res://src/Audio/AudioManager.cs"
+
 [display]
 
 window/size/viewport_width=1920

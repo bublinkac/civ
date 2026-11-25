@@ -57,17 +57,18 @@ public class EspionageSystem
         switch (mission)
         {
             case EspionageMission.EstablishEmbassy:
-                if (_sim.Diplomacy.HasEmbassy(playerFaction, targetFaction))
+                if (_sim.Diplomacy.HasEmbassy(playerFaction, targetFaction) || _sim.IsAtWar(playerFaction, targetFaction))
                 {
-                    Console.WriteLine($"[Espionage] Embassy already exists with {targetFaction}!");
+                    Console.WriteLine($"[Espionage] Cannot establish embassy with {targetFaction}!");
                     if (playerFaction == Faction.Player) _sim.PlayerTreasury += cost; // refund
                     return false;
                 }
                 
-                // 100% success
-                _sim.Diplomacy.EstablishEmbassy(playerFaction, targetFaction);
-                Console.WriteLine($"[Espionage] Embassy established with {targetFaction}!");
-                return true;
+                // Refund cost here since Diplomacy.EstablishEmbassy handles the 50g deduction & TurnEvent
+                if (playerFaction == Faction.Player) _sim.PlayerTreasury += cost;
+                bool ok = _sim.Diplomacy.EstablishEmbassy(playerFaction, targetFaction);
+                if (ok) Console.WriteLine($"[Espionage] Embassy established with {targetFaction}!");
+                return ok;
 
             case EspionageMission.PlantSpy:
                 if (_sim.Diplomacy.HasSpy(playerFaction, targetFaction))

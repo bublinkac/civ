@@ -851,13 +851,40 @@ This backlog outlines clear specifications and implementation tasks for the next
 
 ---
 
+## Phase 48: Expanded Foreign Advisor (F4) & Diplomacy System (COMPLETED)
+
+### 1. Core Diplomacy & Treaty Mechanics (`src/Core/Diplomacy/DiplomacyManager.cs`, `EspionageSystem.cs`)
+- [x] **Embassies:** `EstablishEmbassy` (50g) with war/treasury validation, TurnEvent notifications, and double-charge bug fix in `EspionageSystem.cs`.
+- [x] **Diplomatic Attitudes:** Dynamic `DiplomaticAttitude` calculation (`Furious`, `Annoyed`, `Cautious`, `Polite`, `Gracious`) driven by war status, embassies, active pacts, trade deals, and peace duration.
+- [x] **Deal Valuation (`EvaluateDeal`):** Comprehensive AI valuation of Lump Sum Gold, Gold Per Turn (GPT), Technologies (scaled by `ScienceCost`), Strategic/Luxury Resources, World Maps, Right of Passage, Mutual Protection Pacts, Military Alliances, and Peace Treaties.
+- [x] **Mutual Protection Pact (MPP) Auto-War:** Declaring war on a nation with an active MPP automatically brings their pact allies into the war with `TurnEvent` briefings.
+- [x] **Multi-Faction Tech & Map Sharing:** `GiveTech` and `ShareMap` generalized across all AI factions, revealing rival city/unit territories upon World Map exchange.
+
+### 2. Full Diplomatic Negotiation UI (`src/UI/DiplomacyDialog.cs`)
+- [x] **Interactive Trade Table:** Supports Lump Sum Gold (+50g / +200g), Gold Per Turn (+5 GPT), selectable Technologies (`GetTradableTechs`), connected Resources (`GetTradableResources`), and World Map exchange.
+- [x] **Formal Treaties:** Toggles for Peace Treaty (at war), Right of Passage, Mutual Protection Pact, and Military Alliance (unlocked with Embassy).
+
+### 3. Expanded Foreign Advisor Panel (`src/UI/ForeignAdvisorPanel.cs`)
+- [x] **Selected Rival Dossier:** Clicking any civilization displays attitude, Embassy/Spy intelligence (Government, Treasury, Military count), tradable tech comparison, connected resources, and quick actions (`Negotiate`, `Establish Embassy`, `Map Trade`, `Pact / RoP`, `Espionage`, `Declare War` / `Propose Peace`).
+- [x] **Active Treaties & Agreements Panel:** Lists all active multi-turn agreements with remaining turns and a `[Cancel]` button to terminate pacts.
+- [x] **Automated Verification:** Verified 100% pass rate in `scripts/test_foreign_advisor.ps1` and headless Monte Carlo simulation.
+
+---
+
 ## 🚀 Upcoming Roadmap & Development Backlog (Next Phases)
 
 This backlog outlines clear specifications and implementation tasks for the next developers or agents continuing work on the project.
 
-### Phase 48: Audio & Era-Specific Atmospheric Soundscapes (Low Priority)
-- [ ] **Era BGM Switching:**
-  - Implement dynamic soundtrack switching based on the current era (Ancient, Middle Ages, Industrial, Modern).
-- [ ] **Combat & Unit Sound Effects:**
-  - Add dedicated sound clips for ranged artillery fire, horse gallops, tank treads, jet engines, and sword clashes.
+### Phase 49: Audio & Era-Specific Atmospheric Soundscapes (IN PROGRESS - Architecture Ready)
+- [x] **AudioManager AutoLoad & Architecture (`src/Audio/AudioManager.cs`, `project.godot`):**
+  - Registered `AudioManager` as an official Godot `[autoload]` singleton.
+  - Added dual-player 1.5s crossfade BGM engine (`PlayEraMusic`, `PlayMenuMusic`), mute/volume controls, stream caching, alias path resolution (`assets/sounds/` & `assets/audio/sfx/`), and SFX frame-cooldown throttling.
+- [x] **Era BGM Switching (`TechManager.GetCurrentEra`, `MapRenderer.cs`):**
+  - Dynamic soundtrack switching across `Ancient`, `MiddleAges`, `Industrial`, and `Modern` eras (`res://assets/audio/music/era_*.ogg/.mp3/.wav`).
+- [x] **Unit-Specific Combat & Movement Routing (`PlayUnitMoveSfx`, `PlayUnitCombatSfx`):**
+  - Routed cavalry, armor, artillery, naval, air, and settler audio cues with automatic fallback to `unit_move.wav` / `combat_hit.wav`.
+- [x] **Procedural Settler WAV Assets:**
+  - Generated `assets/sounds/city_founded.wav` (city-founding fanfare) and `assets/sounds/unit_settler_move.wav` (wagon/footstep crunch).
+- [ ] **Additional Sound & Music Assets:**
+  - Add era BGM tracks (`assets/audio/music/era_*.ogg`) and remaining combat/UI clips (`combat_artillery.wav`, `combat_cavalry.wav`, `combat_armor.wav`, `combat_air.wav`, `ui_click.wav`).
 

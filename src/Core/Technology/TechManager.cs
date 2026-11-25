@@ -251,6 +251,23 @@ public class TechManager
         }
     }
 
+    /// <summary>
+    /// Returns the highest TechEra reached based on researched technologies.
+    /// </summary>
+    public TechEra GetCurrentEra()
+    {
+        TechEra highest = TechEra.Ancient;
+        foreach (var techId in ResearchedTechIds)
+        {
+            var tech = AllTechnologies.Find(t => t.Id == techId);
+            if (tech != null && tech.Era > highest)
+            {
+                highest = tech.Era;
+            }
+        }
+        return highest;
+    }
+
     public string GetResearchStatusString()
     {
         if (CurrentResearch == null)
